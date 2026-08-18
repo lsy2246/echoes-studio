@@ -13,5 +13,10 @@ await writeFile(`${output}/package.json`, JSON.stringify({
   dependencies: { postgres: "3.4.7" },
 }, null, 2));
 await writeFile(`${output}/edgeone.json`, JSON.stringify({
+  cloudFunctions: {
+    nodejs: {
+      maxDuration: 60,
+    },
+  },
   overseasRegions: ["ap-singapore"],
 }, null, 2));
