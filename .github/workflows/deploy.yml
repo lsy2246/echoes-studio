@@ -59,6 +59,7 @@ jobs:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       PROJECT_NAME_VALUE: ${{ vars.PROJECT_NAME }}
       PLATFORM_ACCOUNT: ${{ vars.PLATFORM_ACCOUNT }}
+      EDGEONE_AREA_VALUE: ${{ vars.EDGEONE_AREA }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -79,6 +80,13 @@ jobs:
           set -euo pipefail
           PROJECT_NAME_VALUE="${PROJECT_NAME_VALUE:-echoes-studio}"
           echo "CMS_PROJECT_NAME=$PROJECT_NAME_VALUE" >> "$GITHUB_ENV"
+
+          EDGEONE_AREA_VALUE="${EDGEONE_AREA_VALUE:-overseas}"
+          case "$EDGEONE_AREA_VALUE" in
+            overseas|global) ;;
+            *) echo 'EDGEONE_AREA 只能填写 overseas 或 global。' >&2; exit 2 ;;
+          esac
+          echo "CMS_EDGEONE_AREA=$EDGEONE_AREA_VALUE" >> "$GITHUB_ENV"
 
           [[ -n "$DEPLOY_TOKEN" ]] || { echo '缺少 GitHub Secret：DEPLOY_TOKEN' >&2; exit 1; }
 
@@ -163,7 +171,8 @@ jobs:
           cd .output/edgeone-bundle
           for attempt in 1 2 3; do
             if npx --yes edgeone@1.6.18 makers deploy . \
-              -n "$CMS_PROJECT_NAME" -t "$DEPLOY_TOKEN" -e "$DEPLOY_ENV"; then
+              -n "$CMS_PROJECT_NAME" -t "$DEPLOY_TOKEN" -e "$DEPLOY_ENV" \
+              --area "$CMS_EDGEONE_AREA"; then
               exit 0
             fi
             if [[ "$attempt" == 3 ]]; then

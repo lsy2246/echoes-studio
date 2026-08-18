@@ -13,6 +13,7 @@ EdgeOne 支持 Supabase / PostgreSQL；D1 只支持 Cloudflare Worker，不提�
 | Variable | `DEPLOY_PLATFORM` | `edgeone`                                        |
 | Variable | `DATABASE_DRIVER` | `supabase`；普通 PostgreSQL 可填 `postgres`      |
 | Variable | `PROJECT_NAME`    | 可选；不填就是 `echoes-studio`                   |
+| Variable | `EDGEONE_AREA`    | 可选；默认 `overseas`，即全球不含中国大陆        |
 
 然后运行 `部署 Echoes Studio` Action，平台选择 EdgeOne，数据库选择 Supabase。
 
@@ -22,7 +23,9 @@ Action 会构建应用、迁移数据库、关联或创建 Makers 项目，并�
 
 ## 正式访问地址
 
-部署成功后，EdgeOne 会提供项目域名和带 `eo_token` 的临时预览地址。临时地址只有 3 小时有效；项目域名在中国大陆网络访问时可能返回 `401 UNAUTHORIZED`。这是 EdgeOne 系统域名的访问规则，不是 Studio 登录或后端故障。
+部署成功后，EdgeOne 会提供项目域名和带 `eo_token` 的临时预览地址。临时地址只有 3 小时有效；`overseas` 项目的系统域名在中国大陆网络访问时可能返回 `401 UNAUTHORIZED`。这是 EdgeOne 系统域名的访问规则，不是 Studio 登录或后端故障。
+
+Action 默认使用 `overseas`，对应控制台的 `Global (MLC excluded)`。这个区域绑定自定义域名不要求 ICP 备案。只有确实需要中国大陆节点时，才把 `EDGEONE_AREA` 设置为 `global`；此时腾讯云中国大陆服务会要求账号实名认证，域名也需要完成 ICP 备案。项目区域创建后不能直接修改，切换区域时请使用一个新的 `PROJECT_NAME` 创建新项目。
 
 正式使用时，在 Makers 项目的「域名管理」中绑定自己的域名，并把它关联到 Production 环境。按控制台提示添加 DNS 验证和 CNAME 后，这个域名会始终指向最新一次成功部署，不需要 `eo_token`。EdgeOne 可以自动申请和续期免费 HTTPS 证书。
 
@@ -38,7 +41,7 @@ DEPLOY_PLATFORM=edgeone DATABASE_DRIVER=supabase DATABASE_URL="$DATABASE_URL" pn
 CMS_DATABASE_DRIVER=supabase CMS_DATABASE_URL="$DATABASE_URL" pnpm db:migrate
 node deploy/edgeone/prepare.mjs
 cd .output/edgeone-bundle
-npx --yes edgeone@1.6.18 makers deploy . -n echoes-studio -t "$DEPLOY_TOKEN" -e production
+npx --yes edgeone@1.6.18 makers deploy . -n echoes-studio -t "$DEPLOY_TOKEN" -e production --area overseas
 ```
 
 `DATABASE_URL` 只会注入服务端 Cloud Function 构建产物，不会进入前端静态资源或 Git 仓库。这样不依赖 EdgeOne 控制台的单变量长度限制；线上连接仍由 GitHub Secret 管理。

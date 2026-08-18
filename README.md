@@ -25,6 +25,7 @@ Echoes Studio 连接你的博客仓库，在网页中编辑文章，并把选中
 | Variable | `DATABASE_DRIVER`  | `supabase`、`postgres` 或 `d1`                       |
 | Variable | `PLATFORM_ACCOUNT` | Cloudflare Account ID；Vercel 团队账号填写 team slug |
 | Variable | `PROJECT_NAME`     | 可选，默认 `echoes-studio`                           |
+| Variable | `EDGEONE_AREA`     | EdgeOne 可选；默认 `overseas`，不含中国大陆          |
 
 支持组合如下。平台和数据库是两个独立选择，唯一的特殊规则是 D1 只能由 Cloudflare Worker 原生使用。
 
@@ -43,7 +44,7 @@ Echoes Studio 连接你的博客仓库，在网页中编辑文章，并把选中
 
 之后每次更新 `main` 分支都会按这两个 Variable 自动部署。只想手动部署时可以不填写它们，每次在 Action 中选择即可。
 
-> EdgeOne 的系统预览地址可能带有 3 小时有效的 `eo_token`，在中国大陆直接访问项目域名也可能返回 401。正式使用需要在 EdgeOne「域名管理」中绑定自己的域名；这不是 Studio 的登录限制。详见 [EdgeOne 部署说明](./deploy/edgeone/README.md#正式访问地址)。
+> EdgeOne 默认部署到 `overseas`（Global excluding Chinese Mainland），绑定自定义域名不要求 ICP 备案。需要中国大陆加速时才把 `EDGEONE_AREA` 改为 `global`，并按腾讯云要求完成账号实名和域名备案。系统预览地址仍可能带有 3 小时有效的 `eo_token`。详见 [EdgeOne 部署说明](./deploy/edgeone/README.md#正式访问地址)。
 
 Action 会自动完成：
 
