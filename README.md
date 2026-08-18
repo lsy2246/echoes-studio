@@ -43,6 +43,8 @@ Echoes Studio 连接你的博客仓库，在网页中编辑文章，并把选中
 
 之后每次更新 `main` 分支都会按这两个 Variable 自动部署。只想手动部署时可以不填写它们，每次在 Action 中选择即可。
 
+> EdgeOne 的系统预览地址可能带有 3 小时有效的 `eo_token`，在中国大陆直接访问项目域名也可能返回 401。正式使用需要在 EdgeOne「域名管理」中绑定自己的域名；这不是 Studio 的登录限制。详见 [EdgeOne 部署说明](./deploy/edgeone/README.md#正式访问地址)。
+
 Action 会自动完成：
 
 - 安装依赖、检查代码并构建；
