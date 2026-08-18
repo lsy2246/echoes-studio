@@ -11,6 +11,7 @@ import type {
   EditorDiagnostic,
   EditorView,
   MarkdownEditorDriver,
+  RepositoryConnectionTestResult,
   RepositoryStatus,
 } from "../shared/editor-contract";
 import { CmsApiError, FetchCmsApiClient } from "./api-client";
@@ -110,6 +111,34 @@ async function initializeRequest(values: SetupValues): Promise<void> {
   });
   if (response.ok) return;
   let message = "初始化失败，请检查仓库地址、Token 和数据库连接。";
+  try {
+    const payload = (await response.json()) as { error?: { message?: string } };
+    if (payload.error?.message) message = payload.error.message;
+  } catch {
+    // Keep the localized fallback for non-JSON platform errors.
+  }
+  throw new CmsApiError(message, response.status);
+}
+
+async function testSetupRepositoryRequest(input: {
+  provider: "github" | "gitee";
+  repositoryUrl: string;
+  repositoryToken: string;
+  branch: string;
+  contentRoot: string;
+}): Promise<RepositoryConnectionTestResult> {
+  const response = await fetch("/api/setup/repository/test", {
+    method: "POST",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (response.ok) {
+    const payload = (await response.json()) as {
+      data: RepositoryConnectionTestResult;
+    };
+    return payload.data;
+  }
+  let message = "连接失败，请检查仓库地址、Token 和权限。";
   try {
     const payload = (await response.json()) as { error?: { message?: string } };
     if (payload.error?.message) message = payload.error.message;
@@ -936,6 +965,19 @@ export function CmsApp({ apiClient }: CmsAppProps) {
     [client, loadRepositoryStatus],
   );
 
+  const testRepositorySettings = useCallback(
+    async (
+      input: Parameters<
+        NonNullable<CmsApiClient["testRepositorySettings"]>
+      >[0],
+    ) => {
+      if (!client.testRepositorySettings)
+        throw new Error("当前后端不支持仓库连接检测。");
+      return client.testRepositorySettings(input);
+    },
+    [client],
+  );
+
   const changeAdminPassword = useCallback(
     async (currentPassword: string, newPassword: string) => {
       if (!client.changePassword) throw new Error("当前后端不支持修改密码。");
@@ -1357,6 +1399,7 @@ export function CmsApp({ apiClient }: CmsAppProps) {
         database={setupDatabase}
         busy={authBusy}
         error={authError}
+        onTestRepository={testSetupRepositoryRequest}
         onInitialize={initialize}
       />
     );
@@ -1769,6 +1812,7 @@ export function CmsApp({ apiClient }: CmsAppProps) {
           onAutomationChange={(next) => void updateAutomation(next)}
           onLoadRepository={loadRepositorySettings}
           onSaveRepository={saveRepositorySettings}
+          onTestRepository={testRepositorySettings}
           onChangePassword={changeAdminPassword}
           onLoadInternalToken={loadInternalToken}
           onRotateInternalToken={rotateInternalToken}

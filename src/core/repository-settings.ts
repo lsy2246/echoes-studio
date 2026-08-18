@@ -1,4 +1,13 @@
-export type RepositoryProvider = "filesystem" | "github";
+export type RepositoryProvider = "filesystem" | "github" | "gitee";
+
+export interface RepositoryConnectionTestResult {
+  ok: true;
+  provider: RepositoryProvider;
+  branch: string;
+  headCommit: string;
+  checkedAt: string;
+  message: string;
+}
 
 export interface RepositoryConnectionSettings {
   provider: RepositoryProvider;
@@ -24,5 +33,6 @@ export interface UpdateRepositoryConnectionInput {
 
 export interface RepositorySettingsService {
   get(): Promise<RepositoryConnectionSettings>;
+  test(input: UpdateRepositoryConnectionInput): Promise<RepositoryConnectionTestResult>;
   update(input: UpdateRepositoryConnectionInput): Promise<RepositoryConnectionSettings>;
 }

@@ -2,6 +2,7 @@ import { useEffect, useId, useState, type FormEvent } from "react";
 import type {
   AutomationSettings,
   RepositoryConnectionSettings,
+  RepositoryConnectionTestResult,
   UpdateRepositoryConnectionInput,
 } from "../../shared/editor-contract";
 import { Icon } from "./Icons";
@@ -19,6 +20,9 @@ interface SystemSettingsDialogProps {
   onSaveRepository: (
     input: UpdateRepositoryConnectionInput,
   ) => Promise<RepositoryConnectionSettings>;
+  onTestRepository: (
+    input: UpdateRepositoryConnectionInput,
+  ) => Promise<RepositoryConnectionTestResult>;
   onChangePassword: (
     currentPassword: string,
     newPassword: string,
@@ -73,11 +77,13 @@ function repositoryAddress(settings: RepositoryConnectionSettings): string {
 
 function parseRepositoryAddress(
   value: string,
+  provider: "github" | "gitee",
 ): { owner: string; repository: string } | null {
+  const host = provider === "gitee" ? "gitee.com" : "github.com";
   const normalized = value
     .trim()
-    .replace(/^git@github\.com:/i, "")
-    .replace(/^https?:\/\/(?:www\.)?github\.com\//i, "")
+    .replace(new RegExp(`^git@${host.replace(".", "\\.")}:`, "i"), "")
+    .replace(new RegExp(`^https?://(?:www\\.)?${host.replace(".", "\\.")}/`, "i"), "")
     .replace(/\.git$/i, "")
     .replace(/^\/+|\/+$/g, "");
   const [owner, repository, ...rest] = normalized.split("/");
@@ -96,6 +102,7 @@ export function SystemSettingsDialog({
   onAutomationChange,
   onLoadRepository,
   onSaveRepository,
+  onTestRepository,
   onChangePassword,
   onLoadInternalToken,
   onRotateInternalToken,
@@ -108,6 +115,10 @@ export function SystemSettingsDialog({
   const [repositoryToken, setRepositoryToken] = useState("");
   const [repositoryLoading, setRepositoryLoading] = useState(true);
   const [repositorySaving, setRepositorySaving] = useState(false);
+  const [repositoryTesting, setRepositoryTesting] = useState(false);
+  const [connectionState, setConnectionState] = useState<
+    "idle" | "dirty" | "checking" | "connected" | "failed"
+  >("idle");
   const [repositoryFeedback, setRepositoryFeedback] = useState<{
     kind: "error" | "success";
     text: string;
@@ -145,6 +156,23 @@ export function SystemSettingsDialog({
         if (!cancelled) {
           setRepository(value);
           setRepositoryUrl(repositoryAddress(value));
+          setConnectionState("checking");
+          void onTestRepository({
+            provider: value.provider,
+            owner: value.owner,
+            repository: value.repository,
+            branch: value.branch,
+            contentRoot: value.contentRoot,
+            filesystemPath: value.filesystemPath,
+          }).then((result) => {
+            if (cancelled) return;
+            setConnectionState("connected");
+            setRepositoryFeedback({ kind: "success", text: result.message });
+          }).catch((error) => {
+            if (cancelled) return;
+            setConnectionState("failed");
+            setRepositoryFeedback({ kind: "error", text: message(error) });
+          });
         }
       })
       .catch((error) => {
@@ -157,41 +185,77 @@ export function SystemSettingsDialog({
     return () => {
       cancelled = true;
     };
-  }, [onLoadRepository]);
+  }, [onLoadRepository, onTestRepository]);
+
+  const repositoryInput = (): UpdateRepositoryConnectionInput | null => {
+    const remote = repository.provider !== "filesystem";
+    const coordinates = repository.provider !== "filesystem"
+      ? parseRepositoryAddress(repositoryUrl, repository.provider)
+      : null;
+    if (remote && !coordinates) {
+      setRepositoryFeedback({
+        kind: "error",
+        text: `请输入 owner/repository 或完整 ${repository.provider === "gitee" ? "Gitee" : "GitHub"} 仓库地址。`,
+      });
+      setConnectionState("failed");
+      return null;
+    }
+    return {
+      provider: repository.provider,
+      owner: coordinates?.owner ?? repository.owner,
+      repository: coordinates?.repository ?? repository.repository,
+      branch: repository.branch,
+      contentRoot: repository.contentRoot,
+      filesystemPath: repository.filesystemPath,
+      token: repositoryToken || undefined,
+    };
+  };
+
+  const markRepositoryDirty = () => {
+    setConnectionState("dirty");
+    setRepositoryFeedback(null);
+  };
+
+  const testRepository = async () => {
+    const input = repositoryInput();
+    if (!input) return;
+    setRepositoryTesting(true);
+    setConnectionState("checking");
+    setRepositoryFeedback(null);
+    try {
+      const result = await onTestRepository(input);
+      setConnectionState("connected");
+      setRepositoryFeedback({ kind: "success", text: result.message });
+      if (!repository.branch) {
+        setRepository((current) => ({ ...current, branch: result.branch }));
+      }
+    } catch (error) {
+      setConnectionState("failed");
+      setRepositoryFeedback({ kind: "error", text: message(error) });
+    } finally {
+      setRepositoryTesting(false);
+    }
+  };
 
   const saveRepository = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setRepositorySaving(true);
     setRepositoryFeedback(null);
     try {
-      const coordinates =
-        repository.provider === "github"
-          ? parseRepositoryAddress(repositoryUrl)
-          : null;
-      if (repository.provider === "github" && !coordinates) {
-        setRepositoryFeedback({
-          kind: "error",
-          text: "请输入 owner/repository 或完整 GitHub 仓库地址。",
-        });
-        return;
-      }
-      const saved = await onSaveRepository({
-        provider: repository.provider,
-        owner: coordinates?.owner ?? repository.owner,
-        repository: coordinates?.repository ?? repository.repository,
-        branch: repository.branch,
-        contentRoot: repository.contentRoot,
-        filesystemPath: repository.filesystemPath,
-        token: repositoryToken || undefined,
-      });
+      const input = repositoryInput();
+      if (!input) return;
+      setConnectionState("checking");
+      const saved = await onSaveRepository(input);
       setRepository(saved);
       setRepositoryUrl(repositoryAddress(saved));
       setRepositoryToken("");
+      setConnectionState("connected");
       setRepositoryFeedback({
         kind: "success",
         text: "仓库连接已保存并立即生效。",
       });
     } catch (error) {
+      setConnectionState("failed");
       setRepositoryFeedback({ kind: "error", text: message(error) });
     } finally {
       setRepositorySaving(false);
@@ -323,43 +387,65 @@ export function SystemSettingsDialog({
                       disabled={repositoryLoading || repositorySaving}
                       options={[
                         { value: "github", label: "GitHub 远端仓库" },
+                        { value: "gitee", label: "Gitee 远端仓库" },
                         { value: "filesystem", label: "本地文件仓库" },
                       ]}
-                      onChange={(provider) =>
-                        setRepository((current) => ({ ...current, provider }))
-                      }
+                      onChange={(provider) => {
+                        setRepository((current) => ({ ...current, provider }));
+                        markRepositoryDirty();
+                      }}
                     />
                   </div>
-                  {repository.provider === "github" ? (
+                  <div className={`repository-connection-state is-${connectionState}`} role="status" aria-live="polite">
+                    <span className="repository-connection-state__icon">
+                      {connectionState === "checking" ? <span className="spinner" /> : <span className="connection-dot" />}
+                    </span>
+                    <span>
+                      <strong>
+                        {connectionState === "connected" ? "连接正常" :
+                          connectionState === "failed" ? "连接失败" :
+                          connectionState === "dirty" ? "配置尚未验证" :
+                          connectionState === "checking" ? "正在检测连接" : "等待检测"}
+                      </strong>
+                      <small>
+                        {repositoryFeedback?.text ?? (connectionState === "dirty" ? "地址或凭证已改变，请测试后保存。" : "将验证仓库、分支和访问权限。")}
+                      </small>
+                    </span>
+                  </div>
+                  {repository.provider === "github" || repository.provider === "gitee" ? (
                     <>
                       <div className="settings-field settings-field--wide">
-                        <label htmlFor="settings-repo-url">GitHub 仓库</label>
+                        <label htmlFor="settings-repo-url">
+                          {repository.provider === "gitee" ? "Gitee" : "GitHub"} 仓库
+                        </label>
                         <input
                           id="settings-repo-url"
                           value={repositoryUrl}
-                          onChange={(event) =>
-                            setRepositoryUrl(event.target.value)
-                          }
-                          placeholder="https://github.com/you/blog"
+                          onChange={(event) => {
+                            setRepositoryUrl(event.target.value);
+                            markRepositoryDirty();
+                          }}
+                          placeholder={`https://${repository.provider === "gitee" ? "gitee.com" : "github.com"}/you/blog`}
                           required
                         />
                         <small>支持完整地址或 owner/repository</small>
                       </div>
                       <div className="settings-field settings-field--wide">
                         <label htmlFor="settings-repo-token">
-                          GitHub Token
+                          {repository.provider === "gitee" ? "Gitee" : "GitHub"} Token
                         </label>
                         <input
                           id="settings-repo-token"
                           type="password"
                           value={repositoryToken}
-                          onChange={(event) =>
-                            setRepositoryToken(event.target.value)
-                          }
+                          onChange={(event) => {
+                            setRepositoryToken(event.target.value);
+                            markRepositoryDirty();
+                          }}
                           placeholder={
                             repository.tokenConfigured
                               ? "已配置；留空则保持不变"
-                              : "github_pat_..."
+                              : repository.provider === "gitee" ? "Gitee 私人令牌" : "github_pat_..."
                           }
                           autoComplete="new-password"
                         />
@@ -376,12 +462,13 @@ export function SystemSettingsDialog({
                       <input
                         id="settings-repo-path"
                         value={repository.filesystemPath}
-                        onChange={(event) =>
+                        onChange={(event) => {
                           setRepository((current) => ({
                             ...current,
                             filesystemPath: event.target.value,
-                          }))
-                        }
+                          }));
+                          markRepositoryDirty();
+                        }}
                         placeholder="/path/to/blog"
                         required
                       />
@@ -392,12 +479,13 @@ export function SystemSettingsDialog({
                     <input
                       id="settings-repo-branch"
                       value={repository.branch}
-                      onChange={(event) =>
+                      onChange={(event) => {
                         setRepository((current) => ({
                           ...current,
                           branch: event.target.value,
-                        }))
-                      }
+                        }));
+                        markRepositoryDirty();
+                      }}
                       placeholder="留空自动识别"
                       disabled={repository.provider === "filesystem"}
                     />
@@ -408,31 +496,32 @@ export function SystemSettingsDialog({
                     <input
                       id="settings-content-root"
                       value={repository.contentRoot}
-                      onChange={(event) =>
+                      onChange={(event) => {
                         setRepository((current) => ({
                           ...current,
                           contentRoot: event.target.value,
-                        }))
-                      }
+                        }));
+                        markRepositoryDirty();
+                      }}
                       placeholder="src/content"
                       required
                     />
                   </div>
                   <footer className="settings-form-footer">
-                    <span
-                      className={
-                        repositoryFeedback
-                          ? `settings-feedback is-${repositoryFeedback.kind}`
-                          : "settings-feedback"
-                      }
-                      role="status"
+                    <span className="settings-feedback" />
+                    <button
+                      className="button button--quiet"
+                      type="button"
+                      disabled={repositoryLoading || repositorySaving || repositoryTesting}
+                      onClick={() => void testRepository()}
                     >
-                      {repositoryFeedback?.text}
-                    </span>
+                      {repositoryTesting ? <span className="spinner" /> : <Icon name="refresh" />}
+                      {repositoryTesting ? "正在测试…" : "测试连接"}
+                    </button>
                     <button
                       className="button button--primary"
                       type="submit"
-                      disabled={repositoryLoading || repositorySaving}
+                      disabled={repositoryLoading || repositorySaving || repositoryTesting}
                     >
                       {repositorySaving ? (
                         <span className="spinner" />

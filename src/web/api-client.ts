@@ -14,6 +14,7 @@ import type {
   PublishArticlesResult,
   RepositoryStatus,
   RepositoryConnectionSettings,
+  RepositoryConnectionTestResult,
   UpdateRepositoryConnectionInput,
   RepositorySyncConflict,
   RepositorySyncResult,
@@ -363,6 +364,18 @@ export class FetchCmsApiClient implements CmsApiClient {
       DataEnvelope<RepositoryConnectionSettings>
     >("/settings/repository", {
       method: "PUT",
+      body: JSON.stringify(input),
+    });
+    return payload.data;
+  }
+
+  async testRepositorySettings(
+    input: UpdateRepositoryConnectionInput,
+  ): Promise<RepositoryConnectionTestResult> {
+    const payload = await this.#request<
+      DataEnvelope<RepositoryConnectionTestResult>
+    >("/settings/repository/test", {
+      method: "POST",
       body: JSON.stringify(input),
     });
     return payload.data;

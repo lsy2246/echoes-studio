@@ -4935,6 +4935,102 @@ select {
   grid-template-columns: 1fr 1fr;
 }
 
+.setup-field--provider .select-menu {
+  width: 100%;
+}
+
+.setup-field--provider .select-menu__trigger {
+  min-height: 43px;
+}
+
+.setup-connection-state {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 52px;
+  padding: 10px 12px;
+  border: 1px solid #e4e7ec;
+  border-radius: 9px;
+  background: #f9fafb;
+  color: #475467;
+  transition: border-color 160ms ease, background 160ms ease;
+}
+
+.setup-connection-state__icon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: #f2f4f7;
+}
+
+.setup-connection-state > span:last-child {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.setup-connection-state strong {
+  color: #344054;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.setup-connection-state small {
+  overflow: hidden;
+  color: #667085;
+  font-size: 9px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+}
+
+.setup-connection-state .connection-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #98a2b3;
+}
+
+.setup-connection-state.is-dirty {
+  border-color: #fedf89;
+  background: #fffcf5;
+}
+
+.setup-connection-state.is-dirty .connection-dot {
+  background: #f79009;
+}
+
+.setup-connection-state.is-checking {
+  border-color: #b2ccff;
+  background: #f5f8ff;
+}
+
+.setup-connection-state.is-connected {
+  border-color: #a6f4c5;
+  background: #f6fef9;
+}
+
+.setup-connection-state.is-connected .connection-dot {
+  background: #12b76a;
+  box-shadow: 0 0 0 3px rgb(18 183 106 / 12%);
+}
+
+.setup-connection-state.is-failed {
+  border-color: #fecdca;
+  background: #fffbfa;
+}
+
+.setup-connection-state.is-failed .connection-dot {
+  background: #f04438;
+}
+
+.setup-connection-state.is-failed strong,
+.setup-connection-state.is-failed small {
+  color: #b42318;
+}
+
 .setup-field {
   display: grid;
   min-width: 0;
@@ -5548,6 +5644,92 @@ select {
   grid-column: 1 / -1;
 }
 
+.repository-connection-state {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 60px;
+  padding: 12px 14px;
+  border: 1px solid #d9e2f2;
+  border-radius: 10px;
+  background: #f8faff;
+  color: #344054;
+  transition: border-color .16s ease, background-color .16s ease;
+}
+
+.repository-connection-state > span:last-child {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.repository-connection-state strong {
+  font-size: 12px;
+  font-weight: 680;
+}
+
+.repository-connection-state small {
+  color: #667085;
+  font-size: 10px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.repository-connection-state__icon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: #edf2ff;
+}
+
+.repository-connection-state .connection-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #98a2b3;
+}
+
+.repository-connection-state.is-connected {
+  border-color: #a9dbc8;
+  background: #f2fbf7;
+}
+
+.repository-connection-state.is-connected .repository-connection-state__icon {
+  background: #dcf6ea;
+}
+
+.repository-connection-state.is-connected .connection-dot {
+  background: #12a06a;
+  box-shadow: 0 0 0 4px rgb(18 160 106 / 12%);
+}
+
+.repository-connection-state.is-failed {
+  border-color: #f0b8b2;
+  background: #fff7f6;
+}
+
+.repository-connection-state.is-failed .repository-connection-state__icon {
+  background: #fee9e7;
+}
+
+.repository-connection-state.is-failed .connection-dot {
+  background: #d92d20;
+  box-shadow: 0 0 0 4px rgb(217 45 32 / 10%);
+}
+
+.repository-connection-state.is-dirty {
+  border-color: #e7c377;
+  background: #fffbeb;
+}
+
+.repository-connection-state.is-dirty .connection-dot {
+  background: #dc8b10;
+}
+
 .settings-field label {
   color: #344054;
   font-size: 11px;
@@ -5605,6 +5787,7 @@ select {
 }
 
 .settings-feedback {
+  flex: 1;
   min-height: 18px;
   color: #667085;
   font-size: 11px;

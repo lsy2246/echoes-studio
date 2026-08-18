@@ -13,9 +13,10 @@ import type {
 } from "../core/repository-settings.ts";
 import { decryptSecret, encryptSecret } from "../core/secret-box.ts";
 import { createGitHubRepository } from "./github-repository.ts";
+import { createGiteeRepository } from "./gitee-repository.ts";
 
 interface StoredRepositoryConfig {
-  provider: "filesystem" | "github";
+  provider: "filesystem" | "github" | "gitee";
   owner: string;
   repository: string;
   branch: string;
@@ -31,6 +32,7 @@ interface ConfigurableRepositoryOptions {
   encryptionSecret?: string | (() => Promise<string>);
   fallbackGithubToken?: () => Promise<string>;
   githubApiBaseUrl?: string;
+  giteeApiBaseUrl?: string;
   maxArticleBytes?: number;
   blobConcurrency?: number;
   createFilesystem?: (
@@ -60,7 +62,11 @@ export class ConfigurableRepository
 
   private parse(value: string): StoredRepositoryConfig {
     const parsed = JSON.parse(value) as Partial<StoredRepositoryConfig>;
-    if (parsed.provider !== "filesystem" && parsed.provider !== "github")
+    if (
+      parsed.provider !== "filesystem" &&
+      parsed.provider !== "github" &&
+      parsed.provider !== "gitee"
+    )
       throw new Error("Stored repository provider is invalid");
     return {
       provider: parsed.provider,
@@ -104,7 +110,7 @@ export class ConfigurableRepository
       filesystemPath: config.filesystemPath,
       tokenConfigured:
         Boolean(config.tokenCiphertext) ||
-        Boolean(this.options.fallbackGithubToken),
+        (config.provider === "github" && Boolean(this.options.fallbackGithubToken)),
       updatedAt: stored.updatedAt,
     };
   }
@@ -122,17 +128,19 @@ export class ConfigurableRepository
       throw new Error("文章目录必须是安全的仓库相对路径");
     }
     if (
-      input.provider === "github" &&
+      (input.provider === "github" || input.provider === "gitee") &&
       (!input.owner?.trim() || !input.repository?.trim())
     ) {
-      throw new Error("GitHub 仓库所有者和仓库名不能为空");
+      throw new Error(`${input.provider === "gitee" ? "Gitee" : "GitHub"} 仓库所有者和仓库名不能为空`);
     }
     if (input.provider === "filesystem" && !input.filesystemPath?.trim()) {
       throw new Error("本地仓库路径不能为空");
     }
     let tokenCiphertext = input.clearToken
       ? null
-      : (current?.config.tokenCiphertext ?? null);
+      : current?.config.provider === input.provider
+        ? (current.config.tokenCiphertext ?? null)
+        : null;
     let clearToken = input.token?.trim() || "";
     if (clearToken) {
       const secret = await this.encryptionSecret();
@@ -144,22 +152,8 @@ export class ConfigurableRepository
       clearToken = await decryptSecret(tokenCiphertext, secret);
     }
     let branch = input.branch?.trim() ?? "";
-    if (input.provider === "github") {
-      const probe = createGitHubRepository({
-        owner: input.owner!.trim(),
-        repository: input.repository!.trim(),
-        branch: branch || undefined,
-        contentRoot,
-        token: clearToken
-          ? async () => clearToken
-          : this.options.fallbackGithubToken,
-        apiBaseUrl: this.options.githubApiBaseUrl,
-        maxArticleBytes: this.options.maxArticleBytes,
-        blobConcurrency: this.options.blobConcurrency,
-      });
-      const status = await probe.status();
-      branch ||= status.defaultBranch;
-    }
+    const tested = await this.test({ ...input, contentRoot, token: clearToken || undefined });
+    branch ||= tested.branch;
     const config: StoredRepositoryConfig = {
       provider: input.provider,
       owner: input.owner?.trim() ?? "",
@@ -178,6 +172,57 @@ export class ConfigurableRepository
     return this.get();
   }
 
+  async test(input: UpdateRepositoryConnectionInput) {
+    const contentRoot = normalizePath(input.contentRoot, "src/content");
+    let clearToken = input.token?.trim() || "";
+    if (!clearToken && !input.clearToken) {
+      const current = await this.stored();
+      if (current?.config.tokenCiphertext && current.config.provider === input.provider) {
+        const secret = await this.encryptionSecret();
+        if (!secret) throw new Error("服务端尚未生成安装密钥");
+        clearToken = await decryptSecret(current.config.tokenCiphertext, secret);
+      }
+    }
+    let port: GitRepositoryPort;
+    if (input.provider === "filesystem") {
+      if (!input.filesystemPath?.trim()) throw new Error("本地仓库路径不能为空");
+      if (!this.options.createFilesystem) throw new Error("当前运行平台不支持本地文件仓库");
+      port = await this.options.createFilesystem(input.filesystemPath.trim(), contentRoot);
+    } else {
+      if (!input.owner?.trim() || !input.repository?.trim()) {
+        throw new Error(`${input.provider === "gitee" ? "Gitee" : "GitHub"} 仓库所有者和仓库名不能为空`);
+      }
+      const common = {
+        owner: input.owner.trim(),
+        repository: input.repository.trim(),
+        branch: input.branch?.trim() || undefined,
+        contentRoot,
+        maxArticleBytes: this.options.maxArticleBytes,
+        blobConcurrency: this.options.blobConcurrency,
+      };
+      port = input.provider === "gitee"
+        ? createGiteeRepository({
+            ...common,
+            token: clearToken ? async () => clearToken : undefined,
+            apiBaseUrl: this.options.giteeApiBaseUrl,
+          })
+        : createGitHubRepository({
+            ...common,
+            token: clearToken ? async () => clearToken : this.options.fallbackGithubToken,
+            apiBaseUrl: this.options.githubApiBaseUrl,
+          });
+    }
+    const status = await port.status();
+    return {
+      ok: true as const,
+      provider: input.provider,
+      branch: status.defaultBranch,
+      headCommit: status.headCommit,
+      checkedAt: status.lastCheckedAt ?? (this.options.now?.() ?? new Date()).toISOString(),
+      message: `连接成功，已读取 ${status.defaultBranch} 分支`,
+    };
+  }
+
   private async active(): Promise<GitRepositoryPort> {
     const settings = await this.options.database.getSystemSettings();
     const raw = settings.repositoryConfigJson;
@@ -193,23 +238,25 @@ export class ConfigurableRepository
         config.contentRoot,
       );
     } else {
-      let token = this.options.fallbackGithubToken;
+      let token = config.provider === "github" ? this.options.fallbackGithubToken : undefined;
       if (config.tokenCiphertext) {
         const secret = await this.encryptionSecret();
         if (!secret) throw new Error("服务端尚未生成安装密钥");
         const clear = await decryptSecret(config.tokenCiphertext, secret);
         token = async () => clear;
       }
-      port = createGitHubRepository({
+      const common = {
         owner: config.owner,
         repository: config.repository,
         branch: config.branch || undefined,
         contentRoot: config.contentRoot,
         token,
-        apiBaseUrl: this.options.githubApiBaseUrl,
         maxArticleBytes: this.options.maxArticleBytes,
         blobConcurrency: this.options.blobConcurrency,
-      });
+      };
+      port = config.provider === "gitee"
+        ? createGiteeRepository({ ...common, apiBaseUrl: this.options.giteeApiBaseUrl })
+        : createGitHubRepository({ ...common, apiBaseUrl: this.options.githubApiBaseUrl });
     }
     this.cachedJson = raw;
     this.cachedPort = port;

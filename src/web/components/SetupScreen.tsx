@@ -1,10 +1,13 @@
-import { useId, useState, type FormEvent } from "react";
+import { useEffect, useId, useState, type FormEvent } from "react";
+import type { RepositoryConnectionTestResult } from "../../shared/editor-contract";
 import { Icon } from "./Icons";
+import { SelectMenu } from "./SelectMenu";
 
 export interface SetupValues {
   password: string;
+  repositoryProvider: "github" | "gitee";
   repositoryUrl: string;
-  githubToken: string;
+  repositoryToken: string;
   branch: string;
   contentRoot: string;
 }
@@ -13,37 +16,126 @@ interface SetupScreenProps {
   database?: string;
   busy?: boolean;
   error?: string | null;
+  onTestRepository: (input: {
+    provider: "github" | "gitee";
+    repositoryUrl: string;
+    repositoryToken: string;
+    branch: string;
+    contentRoot: string;
+  }) => Promise<RepositoryConnectionTestResult>;
   onInitialize: (values: SetupValues) => void | Promise<void>;
+}
+
+type SetupConnectionState =
+  | "idle"
+  | "dirty"
+  | "checking"
+  | "connected"
+  | "failed";
+
+interface SetupRepositoryDraft {
+  repositoryUrl: string;
+  repositoryToken: string;
 }
 
 export function SetupScreen({
   database = "数据库",
   busy = false,
   error,
+  onTestRepository,
   onInitialize,
 }: SetupScreenProps) {
   const id = useId();
   const [visible, setVisible] = useState(false);
   const [advanced, setAdvanced] = useState(false);
+  const [connectionState, setConnectionState] =
+    useState<SetupConnectionState>("idle");
+  const [connectionMessage, setConnectionMessage] = useState(
+    "填写仓库地址和 Token 后自动检测",
+  );
+  const [repositoryDrafts, setRepositoryDrafts] = useState<
+    Record<"github" | "gitee", SetupRepositoryDraft>
+  >({
+    github: { repositoryUrl: "", repositoryToken: "" },
+    gitee: { repositoryUrl: "", repositoryToken: "" },
+  });
   const [values, setValues] = useState({
     password: "",
     confirmPassword: "",
-    repositoryUrl: "",
-    githubToken: "",
+    repositoryProvider: "github" as "github" | "gitee",
     branch: "",
     contentRoot: "src/content",
   });
   const passwordMismatch = Boolean(
     values.confirmPassword && values.password !== values.confirmPassword,
   );
+  const activeRepository = repositoryDrafts[values.repositoryProvider];
+
+  useEffect(() => {
+    const repositoryUrl = activeRepository.repositoryUrl.trim();
+    const repositoryToken = activeRepository.repositoryToken.trim();
+    if (!repositoryUrl || !repositoryToken) {
+      setConnectionState(repositoryUrl || repositoryToken ? "dirty" : "idle");
+      setConnectionMessage(
+        repositoryUrl || repositoryToken
+          ? "继续填写仓库地址和 Token"
+          : "填写仓库地址和 Token 后自动检测",
+      );
+      return;
+    }
+    let cancelled = false;
+    setConnectionState("dirty");
+    setConnectionMessage("配置已改变，准备检测连接");
+    const timer = window.setTimeout(() => {
+      setConnectionState("checking");
+      setConnectionMessage("正在验证仓库、分支和访问权限…");
+      void onTestRepository({
+        provider: values.repositoryProvider,
+        repositoryUrl,
+        repositoryToken,
+        branch: values.branch.trim(),
+        contentRoot: values.contentRoot.trim() || "src/content",
+      })
+        .then((result) => {
+          if (cancelled) return;
+          setConnectionState("connected");
+          setConnectionMessage(result.message);
+        })
+        .catch((testError) => {
+          if (cancelled) return;
+          setConnectionState("failed");
+          setConnectionMessage(
+            testError instanceof Error ? testError.message : "连接失败，请检查地址和 Token",
+          );
+        });
+    }, 700);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [
+    activeRepository.repositoryToken,
+    activeRepository.repositoryUrl,
+    onTestRepository,
+    values.branch,
+    values.contentRoot,
+    values.repositoryProvider,
+  ]);
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (busy || values.password.length < 8 || passwordMismatch) return;
+    if (
+      busy ||
+      values.password.length < 8 ||
+      passwordMismatch ||
+      connectionState !== "connected"
+    )
+      return;
     void onInitialize({
       password: values.password,
-      repositoryUrl: values.repositoryUrl.trim(),
-      githubToken: values.githubToken.trim(),
+      repositoryProvider: values.repositoryProvider,
+      repositoryUrl: activeRepository.repositoryUrl.trim(),
+      repositoryToken: activeRepository.repositoryToken.trim(),
       branch: values.branch.trim(),
       contentRoot: values.contentRoot.trim() || "src/content",
     });
@@ -182,50 +274,103 @@ export function SetupScreen({
               </fieldset>
 
               <fieldset className="setup-fieldset">
-                <legend>GitHub 内容仓库</legend>
+                <legend>远端内容仓库</legend>
                 <p>
-                  只需要仓库地址和 fine-grained
-                  Token，所有者、仓库名和默认分支会自动识别。
+                  选择 GitHub 或 Gitee，填入仓库地址和 Token，所有者、仓库名和默认分支会自动识别。
                 </p>
+                <label className="setup-field setup-field--provider">
+                  <span>仓库平台</span>
+                  <SelectMenu<"github" | "gitee">
+                    label="仓库平台"
+                    value={values.repositoryProvider}
+                    options={[
+                      { value: "github", label: "GitHub" },
+                      { value: "gitee", label: "Gitee" },
+                    ]}
+                    onChange={(repositoryProvider) =>
+                      setValues((current) => ({
+                        ...current,
+                        repositoryProvider,
+                      }))
+                    }
+                  />
+                </label>
                 <div className="setup-grid">
                   <label className="setup-field">
                     <span>仓库地址</span>
                     <div className="setup-input">
                       <Icon name="cloud" size={16} />
                       <input
-                        value={values.repositoryUrl}
+                        value={activeRepository.repositoryUrl}
                         onChange={(event) =>
-                          setValues((current) => ({
+                          setRepositoryDrafts((current) => ({
                             ...current,
-                            repositoryUrl: event.target.value,
+                            [values.repositoryProvider]: {
+                              ...current[values.repositoryProvider],
+                              repositoryUrl: event.target.value,
+                            },
                           }))
                         }
-                        placeholder="https://github.com/you/blog"
+                        placeholder={`https://${values.repositoryProvider === "gitee" ? "gitee.com" : "github.com"}/you/blog`}
                         inputMode="url"
                         required
                       />
                     </div>
                   </label>
                   <label className="setup-field">
-                    <span>GitHub Token</span>
+                    <span>{values.repositoryProvider === "gitee" ? "Gitee" : "GitHub"} Token</span>
                     <div className="setup-input setup-input--token">
                       <Icon name="command" size={16} />
                       <input
                         type="password"
-                        value={values.githubToken}
+                        value={activeRepository.repositoryToken}
                         onChange={(event) =>
-                          setValues((current) => ({
+                          setRepositoryDrafts((current) => ({
                             ...current,
-                            githubToken: event.target.value,
+                            [values.repositoryProvider]: {
+                              ...current[values.repositoryProvider],
+                              repositoryToken: event.target.value,
+                            },
                           }))
                         }
-                        placeholder="github_pat_..."
+                        placeholder={values.repositoryProvider === "gitee" ? "Gitee 私人令牌" : "github_pat_..."}
                         autoComplete="off"
                         required
                       />
                     </div>
-                    <small>Token 只需授予目标仓库的 Contents 读写权限</small>
+                    <small>
+                      {values.repositoryProvider === "gitee"
+                        ? "Token 需要目标仓库的读写权限"
+                        : "Token 只需授予目标仓库的 Contents 读写权限"}
+                    </small>
                   </label>
+                </div>
+                <div
+                  className={`setup-connection-state is-${connectionState}`}
+                  role="status"
+                  aria-live="polite"
+                >
+                  <span className="setup-connection-state__icon">
+                    {connectionState === "checking" ? (
+                      <span className="spinner" />
+                    ) : (
+                      <span className="connection-dot" />
+                    )}
+                  </span>
+                  <span>
+                    <strong>
+                      {connectionState === "connected"
+                        ? "连接成功"
+                        : connectionState === "failed"
+                          ? "连接失败"
+                          : connectionState === "checking"
+                            ? "正在检测"
+                            : connectionState === "dirty"
+                              ? "等待检测"
+                              : "尚未检测"}
+                    </strong>
+                    <small>{connectionMessage}</small>
+                  </span>
                 </div>
               </fieldset>
 
@@ -293,7 +438,10 @@ export function SetupScreen({
                 className="button button--primary setup-submit"
                 type="submit"
                 disabled={
-                  busy || passwordMismatch || values.password.length < 8
+                  busy ||
+                  passwordMismatch ||
+                  values.password.length < 8 ||
+                  connectionState !== "connected"
                 }
               >
                 {busy ? <span className="spinner" /> : <Icon name="chevron" />}

@@ -155,6 +155,16 @@ describe("createApp repository orchestration", () => {
             updatedAt: "2026-08-13T12:00:00.000Z",
           };
         },
+        async test(input) {
+          return {
+            ok: true,
+            provider: input.provider,
+            branch: input.branch || "main",
+            headCommit: "a".repeat(40),
+            checkedAt: "2026-08-13T12:00:00.000Z",
+            message: "连接成功",
+          };
+        },
       },
     });
 
@@ -162,14 +172,31 @@ describe("createApp repository orchestration", () => {
     assert.equal(status.status, 200);
     assert.equal((await payload(status)).data.required, true);
 
+    const connectionTest = await app(
+      request("/api/setup/repository/test", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          provider: "gitee",
+          repositoryUrl: "https://gitee.com/echoes/site.git",
+          repositoryToken: "gitee_token_test",
+          contentRoot: "src/content",
+        }),
+      }),
+    );
+    assert.equal(connectionTest.status, 200);
+    assert.equal((await payload(connectionTest)).data.provider, "gitee");
+    assert.equal(repositoryInputs.length, 0);
+
     const initialized = await app(
       request("/api/setup/initialize", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           password: "a-new-secure-password",
-          repositoryUrl: "https://github.com/echoes/site.git",
-          githubToken: "github_pat_test",
+          repositoryProvider: "gitee",
+          repositoryUrl: "https://gitee.com/echoes/site.git",
+          repositoryToken: "gitee_token_test",
           contentRoot: "src/content",
         }),
       }),
@@ -187,12 +214,12 @@ describe("createApp repository orchestration", () => {
         token: repositoryInput.token,
       },
       {
-        provider: "github",
+        provider: "gitee",
         owner: "echoes",
         repository: "site",
         branch: "",
         contentRoot: "src/content",
-        token: "github_pat_test",
+        token: "gitee_token_test",
       },
     );
     const settings = await database.getSystemSettings();
@@ -1011,5 +1038,49 @@ describe("createApp repository orchestration", () => {
     );
     assert.equal(restored.source, source);
     assert.equal(restored.syncStatus, "unpublished");
+  });
+
+  it("tests a Gitee connection without overwriting saved settings", async () => {
+    const database = new MemoryDatabase();
+    const tested: UpdateRepositoryConnectionInput[] = [];
+    let updateCalls = 0;
+    const app = createApp({
+      ...appOptions(database),
+      repositorySettings: {
+        async get() {
+          return {
+            provider: "github", owner: "echoes", repository: "site", branch: "main",
+            contentRoot: "src/content", filesystemPath: "", tokenConfigured: true, updatedAt: null,
+          };
+        },
+        async update(input) {
+          updateCalls += 1;
+          return {
+            provider: input.provider, owner: input.owner ?? "", repository: input.repository ?? "",
+            branch: input.branch ?? "master", contentRoot: input.contentRoot,
+            filesystemPath: input.filesystemPath ?? "", tokenConfigured: Boolean(input.token), updatedAt: null,
+          };
+        },
+        async test(input) {
+          tested.push(input);
+          return {
+            ok: true, provider: input.provider, branch: "master", headCommit: "b".repeat(40),
+            checkedAt: "2026-08-13T12:00:00.000Z", message: "连接成功，已读取 master 分支",
+          };
+        },
+      },
+    });
+    const response = await app(request("/api/settings/repository/test", {
+      method: "POST",
+      headers: ADMIN_HEADERS,
+      body: JSON.stringify({
+        provider: "gitee", owner: "echoes", repository: "site", branch: "",
+        contentRoot: "src/content", token: "gitee-token",
+      }),
+    }));
+    assert.equal(response.status, 200);
+    assert.equal((await payload(response)).data.provider, "gitee");
+    assert.equal(tested[0]?.token, "gitee-token");
+    assert.equal(updateCalls, 0);
   });
 });

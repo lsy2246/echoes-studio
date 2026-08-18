@@ -98,14 +98,18 @@ function optionalInteger(value: unknown, field: string): number | undefined {
   return Number(value);
 }
 
-function githubRepositoryCoordinates(value: unknown): {
+function repositoryCoordinates(
+  value: unknown,
+  provider: "github" | "gitee",
+): {
   owner: string;
   repository: string;
 } {
   const raw = requiredString(value, "repositoryUrl", { max: 512 }).trim();
+  const host = provider === "gitee" ? "gitee.com" : "github.com";
   const normalized = raw
-    .replace(/^git@github\.com:/i, "")
-    .replace(/^https?:\/\/(?:www\.)?github\.com\//i, "")
+    .replace(new RegExp(`^git@${host.replace(".", "\\.")}:`, "i"), "")
+    .replace(new RegExp(`^https?://(?:www\\.)?${host.replace(".", "\\.")}/`, "i"), "")
     .replace(/\.git$/i, "")
     .replace(/^\/+|\/+$/g, "");
   const [owner, repository, ...rest] = normalized.split("/");
@@ -117,7 +121,7 @@ function githubRepositoryCoordinates(value: unknown): {
     !/^[\w.-]+$/.test(repository)
   ) {
     throw badRequest(
-      "repositoryUrl must be a GitHub owner/repository name or URL",
+      `repositoryUrl must be a ${provider === "gitee" ? "Gitee" : "GitHub"} owner/repository name or URL`,
     );
   }
   return { owner, repository };
@@ -582,6 +586,50 @@ export function createApp(
       });
     }
 
+    if (path === "/api/setup/repository/test") {
+      if (request.method !== "POST") methodNotAllowed(["POST"]);
+      if (await passwordIdentity()) {
+        throw new AppError(
+          409,
+          "conflict",
+          "Studio has already been initialized",
+        );
+      }
+      if (!options.repositorySettings) {
+        throw new AppError(
+          503,
+          "service_unavailable",
+          "Repository settings are unavailable",
+        );
+      }
+      const body = await readJson(request, Math.min(maxBodyBytes, 8192));
+      if (body.provider !== "github" && body.provider !== "gitee") {
+        throw badRequest("provider must be github or gitee");
+      }
+      const coordinates = repositoryCoordinates(body.repositoryUrl, body.provider);
+      try {
+        return json({
+          data: await options.repositorySettings.test({
+            provider: body.provider,
+            ...coordinates,
+            branch: typeof body.branch === "string" ? body.branch : "",
+            contentRoot:
+              typeof body.contentRoot === "string"
+                ? body.contentRoot
+                : "src/content",
+            token: requiredString(body.repositoryToken, "repositoryToken", {
+              max: 4096,
+            }),
+          }),
+        });
+      } catch (error) {
+        if (error instanceof AppError) throw error;
+        throw badRequest(
+          error instanceof Error ? error.message : "Repository connection failed",
+        );
+      }
+    }
+
     if (path === "/api/setup/initialize") {
       if (request.method !== "POST") methodNotAllowed(["POST"]);
       if (options.allowUnauthenticated === true) {
@@ -603,7 +651,11 @@ export function createApp(
       if (password.length < 8)
         throw badRequest("password must contain at least 8 characters");
       const current = await generatedSecrets();
-      if (body.repositoryUrl !== undefined || body.githubToken !== undefined) {
+      if (
+        body.repositoryUrl !== undefined ||
+        body.repositoryToken !== undefined ||
+        body.githubToken !== undefined
+      ) {
         if (!options.repositorySettings) {
           throw new AppError(
             503,
@@ -611,16 +663,21 @@ export function createApp(
             "Repository settings are unavailable",
           );
         }
-        const coordinates = githubRepositoryCoordinates(body.repositoryUrl);
+        const provider = body.repositoryProvider === "gitee" ? "gitee" : "github";
+        const coordinates = repositoryCoordinates(body.repositoryUrl, provider);
         await options.repositorySettings.update({
-          provider: "github",
+          provider,
           ...coordinates,
           branch: typeof body.branch === "string" ? body.branch : "",
           contentRoot:
             typeof body.contentRoot === "string"
               ? body.contentRoot
               : "src/content",
-          token: requiredString(body.githubToken, "githubToken", { max: 4096 }),
+          token: requiredString(
+            body.repositoryToken ?? body.githubToken,
+            "repositoryToken",
+            { max: 4096 },
+          ),
         });
       }
       const passwordHash = await hashPassword(password);
@@ -775,6 +832,41 @@ export function createApp(
       );
     }
 
+    if (path === "/api/settings/repository/test") {
+      if (!options.repositorySettings)
+        throw new AppError(
+          503,
+          "service_unavailable",
+          "Repository settings are unavailable",
+        );
+      if (request.method !== "POST") methodNotAllowed(["POST"]);
+      const body = await readJson(request, Math.min(maxBodyBytes, 64 * 1024));
+      if (
+        body.provider !== "filesystem" &&
+        body.provider !== "github" &&
+        body.provider !== "gitee"
+      ) {
+        throw badRequest("provider must be filesystem, github or gitee");
+      }
+      try {
+        return json({
+          data: await options.repositorySettings.test({
+            provider: body.provider,
+            owner: typeof body.owner === "string" ? body.owner : undefined,
+            repository: typeof body.repository === "string" ? body.repository : undefined,
+            branch: typeof body.branch === "string" ? body.branch : undefined,
+            contentRoot: requiredString(body.contentRoot, "contentRoot", { max: 512 }),
+            filesystemPath: typeof body.filesystemPath === "string" ? body.filesystemPath : undefined,
+            token: typeof body.token === "string" ? body.token : undefined,
+            clearToken: body.clearToken === true,
+          }),
+        });
+      } catch (error) {
+        if (error instanceof AppError) throw error;
+        throw badRequest(error instanceof Error ? error.message : "Repository connection failed");
+      }
+    }
+
     if (path === "/api/settings/repository") {
       if (!options.repositorySettings)
         throw new AppError(
@@ -786,8 +878,12 @@ export function createApp(
         return json({ data: await options.repositorySettings.get() });
       if (request.method === "PUT") {
         const body = await readJson(request, Math.min(maxBodyBytes, 64 * 1024));
-        if (body.provider !== "filesystem" && body.provider !== "github") {
-          throw badRequest("provider must be filesystem or github");
+        if (
+          body.provider !== "filesystem" &&
+          body.provider !== "github" &&
+          body.provider !== "gitee"
+        ) {
+          throw badRequest("provider must be filesystem, github or gitee");
         }
         try {
           return json({

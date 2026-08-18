@@ -121,7 +121,7 @@ export interface RepositoryStatus {
 }
 
 export interface RepositoryConnectionSettings {
-  provider: "filesystem" | "github";
+  provider: "filesystem" | "github" | "gitee";
   owner: string;
   repository: string;
   branch: string;
@@ -132,7 +132,7 @@ export interface RepositoryConnectionSettings {
 }
 
 export interface UpdateRepositoryConnectionInput {
-  provider: "filesystem" | "github";
+  provider: "filesystem" | "github" | "gitee";
   owner?: string;
   repository?: string;
   branch?: string;
@@ -140,6 +140,15 @@ export interface UpdateRepositoryConnectionInput {
   filesystemPath?: string;
   token?: string;
   clearToken?: boolean;
+}
+
+export interface RepositoryConnectionTestResult {
+  ok: true;
+  provider: "filesystem" | "github" | "gitee";
+  branch: string;
+  headCommit: string;
+  checkedAt: string;
+  message: string;
 }
 
 export type RepositorySyncConflict =
@@ -206,6 +215,9 @@ export interface CmsApiClient {
   updateRepositorySettings?(
     input: UpdateRepositoryConnectionInput,
   ): Promise<RepositoryConnectionSettings>;
+  testRepositorySettings?(
+    input: UpdateRepositoryConnectionInput,
+  ): Promise<RepositoryConnectionTestResult>;
   changePassword?(currentPassword: string, newPassword: string): Promise<void>;
   getInternalToken?(): Promise<string>;
   rotateInternalToken?(): Promise<string>;
