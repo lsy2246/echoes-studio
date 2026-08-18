@@ -1,0 +1,10 @@
+node_modules/
+.agents/
+.pnpm-store/
+.output/
+.vercel/
+.data/
+.env
+.env.local
+*.log
+dist/

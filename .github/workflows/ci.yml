@@ -1,0 +1,95 @@
+name: Echoes Studio CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: echoes-studio-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [cloudflare, vercel, edgeone]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.2
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+      - name: Verify target artifact
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          case "$PLATFORM" in
+            cloudflare) test -s .output/server/cloudflare-worker.mjs ;;
+            vercel) test -s .output/server/vercel.mjs ;;
+            edgeone) test -s .output/server/edgeone.mjs ;;
+            *) exit 2 ;;
+          esac
+          test -s .output/public/index.html
+  migration-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        database: [sqlite, d1, postgres]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.2
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: SQLite contract
+        if: matrix.database == 'sqlite'
+        env:
+          CMS_DATABASE_DRIVER: sqlite
+          CMS_SQLITE_PATH: ${{ runner.temp }}/echoes-studio.sqlite
+        run: pnpm db:migrate
+      - name: D1 SQL contract
+        if: matrix.database == 'd1'
+        run: npx --yes wrangler@4.114.0 d1 migrations apply echoes-studio --local --config deploy/cloudflare/wrangler.toml
+      - name: PostgreSQL contract
+        if: matrix.database == 'postgres'
+        run: |
+          docker run -d --name echoes-postgres \
+            -e POSTGRES_PASSWORD=postgres \
+            -e POSTGRES_DB=echoes_studio_test \
+            -p 5432:5432 postgres:17-alpine
+          for attempt in {1..20}; do
+            docker exec echoes-postgres pg_isready -U postgres && break
+            sleep 1
+          done
+          for migration in migrations/postgres/*.sql; do
+            docker exec -i echoes-postgres psql \
+              -U postgres -d echoes_studio_test --set ON_ERROR_STOP=1 \
+              < "$migration"
+          done

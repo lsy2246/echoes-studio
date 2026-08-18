@@ -1,0 +1,172 @@
+name: 部署 Echoes Studio
+
+on:
+  push:
+    branches: [main]
+  workflow_call:
+    inputs:
+      platform:
+        required: true
+        type: string
+      database:
+        required: true
+        type: string
+      environment:
+        required: false
+        type: string
+        default: production
+    secrets:
+      DEPLOY_TOKEN:
+        required: true
+      DATABASE_URL:
+        required: false
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: 后端运行平台
+        required: true
+        type: choice
+        options: [edgeone, vercel, cloudflare]
+      database:
+        description: 数据库驱动
+        required: true
+        type: choice
+        options: [supabase, postgres, d1]
+      environment:
+        description: 部署环境
+        required: true
+        type: choice
+        default: production
+        options: [production, preview]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: echoes-studio-deploy-${{ inputs.platform || vars.DEPLOY_PLATFORM || 'unconfigured' }}-${{ inputs.database || vars.DATABASE_DRIVER || 'unconfigured' }}-${{ inputs.environment || 'production' }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.event_name != 'push' || (vars.DEPLOY_PLATFORM != '' && vars.DATABASE_DRIVER != '')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      DEPLOY_PLATFORM: ${{ inputs.platform || vars.DEPLOY_PLATFORM }}
+      DATABASE_DRIVER: ${{ inputs.database || vars.DATABASE_DRIVER }}
+      DEPLOY_ENVIRONMENT: ${{ inputs.environment || 'production' }}
+      DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      PROJECT_NAME_VALUE: ${{ vars.PROJECT_NAME }}
+      PLATFORM_ACCOUNT: ${{ vars.PLATFORM_ACCOUNT }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.2
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+
+      - name: 检查平台和数据库配置
+        run: |
+          set -euo pipefail
+          PROJECT_NAME_VALUE="${PROJECT_NAME_VALUE:-echoes-studio}"
+          echo "CMS_PROJECT_NAME=$PROJECT_NAME_VALUE" >> "$GITHUB_ENV"
+
+          [[ -n "$DEPLOY_TOKEN" ]] || { echo '缺少 GitHub Secret：DEPLOY_TOKEN' >&2; exit 1; }
+
+          case "$DEPLOY_PLATFORM" in
+            edgeone|vercel|cloudflare) ;;
+            *) echo "不支持的运行平台：$DEPLOY_PLATFORM" >&2; exit 2 ;;
+          esac
+
+          case "$DATABASE_DRIVER" in
+            supabase|postgres)
+              [[ -n "$DATABASE_URL" ]] || { echo 'PostgreSQL/Supabase 需要 GitHub Secret：DATABASE_URL' >&2; exit 1; }
+              if [[ "$DEPLOY_PLATFORM" == "cloudflare" ]]; then
+                [[ -n "$PLATFORM_ACCOUNT" ]] || { echo 'Cloudflare 还需要 GitHub Variable：PLATFORM_ACCOUNT（Account ID）' >&2; exit 1; }
+              fi
+              ;;
+            d1)
+              [[ "$DEPLOY_PLATFORM" == "cloudflare" ]] || { echo 'D1 binding 只能由 Cloudflare runtime 使用。' >&2; exit 1; }
+              [[ -n "$PLATFORM_ACCOUNT" ]] || { echo 'Cloudflare 还需要 GitHub Variable：PLATFORM_ACCOUNT（Account ID）' >&2; exit 1; }
+              ;;
+            *) echo "不支持的数据库驱动：$DATABASE_DRIVER" >&2; exit 2 ;;
+          esac
+
+      - name: 迁移 PostgreSQL / Supabase
+        if: env.DATABASE_DRIVER == 'supabase' || env.DATABASE_DRIVER == 'postgres'
+        env:
+          CMS_DATABASE_DRIVER: ${{ env.DATABASE_DRIVER }}
+          CMS_DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          CMS_DATABASE_MIGRATE: "true"
+        run: pnpm db:migrate
+
+      - name: 准备 Cloudflare 数据库和部署配置
+        if: env.DEPLOY_PLATFORM == 'cloudflare'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.PLATFORM_ACCOUNT }}
+        run: node deploy/cloudflare/prepare.mjs
+
+      - name: 迁移 D1
+        if: env.DEPLOY_PLATFORM == 'cloudflare' && env.DATABASE_DRIVER == 'd1'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.PLATFORM_ACCOUNT }}
+        run: npx --yes wrangler@4.114.0 d1 migrations apply "$CMS_PROJECT_NAME" --remote --config .output/wrangler.toml
+
+      - name: 部署 Cloudflare 后端
+        if: env.DEPLOY_PLATFORM == 'cloudflare'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.PLATFORM_ACCOUNT }}
+        run: npx --yes wrangler@4.114.0 deploy --config .output/wrangler.toml
+
+      - name: 配置数据库并部署 Vercel 后端
+        if: env.DEPLOY_PLATFORM == 'vercel'
+        env:
+          DEPLOY_ENV: ${{ env.DEPLOY_ENVIRONMENT }}
+        run: |
+          set -euo pipefail
+          scope_args=()
+          if [[ -n "$PLATFORM_ACCOUNT" ]]; then
+            scope_args+=(--scope "$PLATFORM_ACCOUNT")
+          fi
+
+          node deploy/vercel/prepare.mjs
+          npx --yes vercel@56.5.0 link --yes --project "$CMS_PROJECT_NAME" --token "$DEPLOY_TOKEN" "${scope_args[@]}"
+
+          deploy_args=(deploy --prebuilt --yes --token "$DEPLOY_TOKEN")
+          deploy_args+=(--env "CMS_DATABASE_DRIVER=$DATABASE_DRIVER")
+          deploy_args+=(--env "CMS_DATABASE_URL=$DATABASE_URL")
+          deploy_args+=(--env "CMS_DATABASE_MIGRATE=false")
+          if [[ "$DEPLOY_ENV" == "production" ]]; then
+            deploy_args+=(--prod)
+          fi
+          npx --yes vercel@56.5.0 "${deploy_args[@]}" "${scope_args[@]}"
+
+      - name: 配置数据库并部署 EdgeOne 后端
+        if: env.DEPLOY_PLATFORM == 'edgeone'
+        env:
+          DEPLOY_ENV: ${{ env.DEPLOY_ENVIRONMENT }}
+        run: |
+          set -euo pipefail
+          node deploy/edgeone/prepare.mjs
+          cd .output/edgeone-bundle
+          if ! npx --yes edgeone@1.6.18 makers link --name "$CMS_PROJECT_NAME" -t "$DEPLOY_TOKEN"; then
+            echo '项目尚未创建，先执行一次初始化部署。'
+            npx --yes edgeone@1.6.18 makers deploy . -n "$CMS_PROJECT_NAME" -t "$DEPLOY_TOKEN" -e "$DEPLOY_ENV"
+            npx --yes edgeone@1.6.18 makers link --name "$CMS_PROJECT_NAME" -t "$DEPLOY_TOKEN"
+          fi
+          npx --yes edgeone@1.6.18 makers env set CMS_DATABASE_DRIVER "$DATABASE_DRIVER" -t "$DEPLOY_TOKEN"
+          npx --yes edgeone@1.6.18 makers env set CMS_DATABASE_URL "$DATABASE_URL" -t "$DEPLOY_TOKEN"
+          npx --yes edgeone@1.6.18 makers env set CMS_DATABASE_MIGRATE false -t "$DEPLOY_TOKEN"
+          npx --yes edgeone@1.6.18 makers deploy . -n "$CMS_PROJECT_NAME" -t "$DEPLOY_TOKEN" -e "$DEPLOY_ENV"

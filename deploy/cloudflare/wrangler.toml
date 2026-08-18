@@ -1,0 +1,22 @@
+name = "echoes-studio"
+main = "../../.output/server/cloudflare-worker.mjs"
+compatibility_date = "2026-08-13"
+compatibility_flags = ["nodejs_compat"]
+
+[triggers]
+# 每分钟触发一次 heartbeat，由数据库中的 Studio 设置判断是否到期。
+# 同步周期在 Studio 界面修改，不需要改这里。
+crons = ["* * * * *"]
+
+[assets]
+directory = "../../.output/public"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = ["/api/*"]
+
+[[d1_databases]]
+binding = "CMS_DB"
+database_name = "echoes-studio"
+# 运行 wrangler d1 create echoes-studio 后替换此值
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "../../migrations/d1"

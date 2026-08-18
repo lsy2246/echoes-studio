@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "skipLibCheck": true,
+    "strict": true,
+    "forceConsistentCasingInFileNames": true,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "incremental": false,
+    "types": ["node"]
+  },
+  "include": [
+    "src/backend/**/*.ts",
+    "src/core/**/*.ts",
+    "src/database/**/*.ts",
+    "src/runtime/**/*.ts",
+    "src/shared/**/*.ts",
+    "test/**/*.ts",
+    "vite.config.ts"
+  ]
+}

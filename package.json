@@ -1,0 +1,46 @@
+{
+  "name": "echoes-studio",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.5"
+  },
+  "scripts": {
+    "dev": "concurrently --kill-others --names api,web --prefix-colors blue,magenta \"pnpm dev:api\" \"pnpm dev:web\"",
+    "dev:api": "tsx watch src/runtime/node-server.ts",
+    "dev:web": "vite",
+    "start": "node --enable-source-maps .output/server/node-server.mjs",
+    "build": "pnpm typecheck && pnpm build:web && pnpm build:server",
+    "build:web": "vite build",
+    "build:server": "node scripts/build-server.mjs",
+    "typecheck": "tsc -p tsconfig.web.json --noEmit && tsc -p tsconfig.server.json --noEmit",
+    "test": "node --import tsx --test test/**/*.test.ts",
+    "test:articles": "node --import tsx --test test/roundtrip/articles.test.ts",
+    "db:migrate": "tsx src/runtime/migrate.ts",
+    "check": "pnpm typecheck && pnpm test && pnpm build"
+  },
+  "dependencies": {
+    "cherry-markdown": "0.11.9",
+    "dompurify": "3.4.13",
+    "markdown-it": "15.0.0",
+    "postgres": "3.4.7",
+    "prettier": "^3.9.6",
+    "react": "19.2.6",
+    "react-dom": "19.2.6",
+    "yaml": "2.9.0",
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "@types/markdown-it": "14.1.2",
+    "@types/node": "24.10.1",
+    "@types/react": "19.2.15",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "5.1.4",
+    "concurrently": "9.2.1",
+    "esbuild": "0.27.7",
+    "tsx": "4.21.0",
+    "typescript": "6.0.3",
+    "vite": "7.3.3"
+  }
+}
