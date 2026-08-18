@@ -161,9 +161,15 @@ jobs:
           set -euo pipefail
           node deploy/edgeone/prepare.mjs
           cd .output/edgeone-bundle
-          if ! npx --yes edgeone@1.6.18 makers link --name "$CMS_PROJECT_NAME" -t "$DEPLOY_TOKEN"; then
-            echo '项目尚未创建，先执行一次初始化部署。'
-            npx --yes edgeone@1.6.18 makers deploy . -n "$CMS_PROJECT_NAME" -t "$DEPLOY_TOKEN" -e "$DEPLOY_ENV"
-            npx --yes edgeone@1.6.18 makers link --name "$CMS_PROJECT_NAME" -t "$DEPLOY_TOKEN"
-          fi
-          npx --yes edgeone@1.6.18 makers deploy . -n "$CMS_PROJECT_NAME" -t "$DEPLOY_TOKEN" -e "$DEPLOY_ENV"
+          for attempt in 1 2 3; do
+            if npx --yes edgeone@1.6.18 makers deploy . \
+              -n "$CMS_PROJECT_NAME" -t "$DEPLOY_TOKEN" -e "$DEPLOY_ENV"; then
+              exit 0
+            fi
+            if [[ "$attempt" == 3 ]]; then
+              echo 'EdgeOne 连续三次部署失败。' >&2
+              exit 1
+            fi
+            echo "EdgeOne API 暂时不可用，准备第 $((attempt + 1)) 次尝试。"
+            sleep $((attempt * 10))
+          done

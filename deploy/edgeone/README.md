@@ -30,7 +30,6 @@ DEPLOY_PLATFORM=edgeone DATABASE_DRIVER=supabase DATABASE_URL="$DATABASE_URL" pn
 CMS_DATABASE_DRIVER=supabase CMS_DATABASE_URL="$DATABASE_URL" pnpm db:migrate
 node deploy/edgeone/prepare.mjs
 cd .output/edgeone-bundle
-npx --yes edgeone@1.6.18 makers link --name echoes-studio -t "$DEPLOY_TOKEN"
 npx --yes edgeone@1.6.18 makers deploy . -n echoes-studio -t "$DEPLOY_TOKEN" -e production
 ```
 

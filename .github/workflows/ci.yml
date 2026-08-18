@@ -84,10 +84,20 @@ jobs:
             -e POSTGRES_PASSWORD=postgres \
             -e POSTGRES_DB=echoes_studio_test \
             -p 5432:5432 postgres:17-alpine
+          database_ready=false
           for attempt in {1..20}; do
-            docker exec echoes-postgres pg_isready -U postgres && break
+            if docker exec echoes-postgres psql \
+              -U postgres -d echoes_studio_test -Atc 'SELECT 1' \
+              | grep -qx '1'; then
+              database_ready=true
+              break
+            fi
             sleep 1
           done
+          if [[ "$database_ready" != true ]]; then
+            docker logs echoes-postgres
+            exit 1
+          fi
           for migration in migrations/postgres/*.sql; do
             docker exec -i echoes-postgres psql \
               -U postgres -d echoes_studio_test --set ON_ERROR_STOP=1 \
