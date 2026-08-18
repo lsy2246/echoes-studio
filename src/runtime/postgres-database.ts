@@ -5,7 +5,7 @@ import {
   createSupabaseDatabase,
   type PostgresClientLike,
   type PostgresQueryResult,
-} from "../database/index.ts";
+} from "../database/postgres.ts";
 
 interface PostgresJsResult extends Array<Record<string, unknown>> {
   count?: number;

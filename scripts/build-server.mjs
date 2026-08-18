@@ -46,3 +46,11 @@ await Promise.all([
     external: ["cloudflare:sockets", "node:*"],
   }),
 ]);
+
+const { readFile } = await import("node:fs/promises");
+for (const artifact of ["vercel.mjs", "edgeone.mjs"]) {
+  const source = await readFile(`.output/server/${artifact}`, "utf8");
+  if (source.includes('import("node:sqlite")')) {
+    throw new Error(`${artifact} must not include the local SQLite runtime`);
+  }
+}
