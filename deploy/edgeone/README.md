@@ -26,14 +26,14 @@ Action 会构建应用、迁移数据库、关联或创建 Makers 项目，并�
 
 ```bash
 pnpm check
+DEPLOY_PLATFORM=edgeone DATABASE_DRIVER=supabase DATABASE_URL="$DATABASE_URL" pnpm build
 CMS_DATABASE_DRIVER=supabase CMS_DATABASE_URL="$DATABASE_URL" pnpm db:migrate
 node deploy/edgeone/prepare.mjs
 cd .output/edgeone-bundle
 npx --yes edgeone@1.6.18 makers link --name echoes-studio -t "$DEPLOY_TOKEN"
-npx --yes edgeone@1.6.18 makers env set CMS_DATABASE_DRIVER supabase -t "$DEPLOY_TOKEN"
-npx --yes edgeone@1.6.18 makers env set CMS_DATABASE_URL "$DATABASE_URL" -t "$DEPLOY_TOKEN"
-npx --yes edgeone@1.6.18 makers env set CMS_DATABASE_MIGRATE false -t "$DEPLOY_TOKEN"
 npx --yes edgeone@1.6.18 makers deploy . -n echoes-studio -t "$DEPLOY_TOKEN" -e production
 ```
+
+`DATABASE_URL` 只会注入服务端 Cloud Function 构建产物，不会进入前端静态资源或 Git 仓库。这样不依赖 EdgeOne 控制台的单变量长度限制；线上连接仍由 GitHub Secret 管理。
 
 [EdgeOne CLI](https://pages.edgeone.ai/zh/document/edgeone-cli) · [Supabase 数据库连接](https://supabase.com/docs/guides/database/connecting-to-postgres)

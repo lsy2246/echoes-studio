@@ -166,7 +166,4 @@ jobs:
             npx --yes edgeone@1.6.18 makers deploy . -n "$CMS_PROJECT_NAME" -t "$DEPLOY_TOKEN" -e "$DEPLOY_ENV"
             npx --yes edgeone@1.6.18 makers link --name "$CMS_PROJECT_NAME" -t "$DEPLOY_TOKEN"
           fi
-          npx --yes edgeone@1.6.18 makers env set CMS_DATABASE_DRIVER "$DATABASE_DRIVER" -t "$DEPLOY_TOKEN"
-          npx --yes edgeone@1.6.18 makers env set CMS_DATABASE_URL "$DATABASE_URL" -t "$DEPLOY_TOKEN"
-          npx --yes edgeone@1.6.18 makers env set CMS_DATABASE_MIGRATE false -t "$DEPLOY_TOKEN"
           npx --yes edgeone@1.6.18 makers deploy . -n "$CMS_PROJECT_NAME" -t "$DEPLOY_TOKEN" -e "$DEPLOY_ENV"

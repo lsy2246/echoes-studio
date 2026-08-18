@@ -3,6 +3,21 @@ import { build } from "esbuild";
 
 await mkdir(".output/server", { recursive: true });
 
+const edgeOneDeploymentEnv = {
+  CMS_DATABASE_DRIVER:
+    process.env.CMS_DATABASE_DRIVER ?? process.env.DATABASE_DRIVER ?? "",
+  CMS_DATABASE_URL:
+    process.env.CMS_DATABASE_URL ?? process.env.DATABASE_URL ?? "",
+  CMS_DATABASE_MIGRATE: "false",
+};
+
+if (
+  process.env.DEPLOY_PLATFORM === "edgeone" &&
+  !edgeOneDeploymentEnv.CMS_DATABASE_URL
+) {
+  throw new Error("EdgeOne deployment requires DATABASE_URL");
+}
+
 await Promise.all([
   build({
     entryPoints: ["src/runtime/node-server.ts"],
@@ -33,6 +48,9 @@ await Promise.all([
     target: "node22",
     sourcemap: true,
     external: ["postgres", "node:sqlite"],
+    define: {
+      __EDGEONE_DEPLOYMENT_ENV__: JSON.stringify(edgeOneDeploymentEnv),
+    },
   }),
   build({
     entryPoints: ["src/runtime/cloudflare-worker.ts"],

@@ -4,7 +4,15 @@ import type { RuntimeEnv } from "./env.ts";
 
 type RuntimeHandler = (request: Request) => Promise<Response>;
 
+declare const __EDGEONE_DEPLOYMENT_ENV__: RuntimeEnv | undefined;
+
 let handler: RuntimeHandler | undefined;
+
+function deploymentEnv(): RuntimeEnv {
+  return typeof __EDGEONE_DEPLOYMENT_ENV__ === "undefined"
+    ? {}
+    : __EDGEONE_DEPLOYMENT_ENV__;
+}
 
 export interface EdgeOneContext {
   request: Request;
@@ -14,9 +22,14 @@ export interface EdgeOneContext {
 
 export async function onRequest(context: EdgeOneContext): Promise<Response> {
   if (!handler) {
-    // Keep process.env as a local/CLI fallback, while preferring the official
-    // EdgeOne request context for variables configured with `makers env set`.
-    const env: RuntimeEnv = { ...process.env, ...(context.env ?? {}) };
+    // Direct-upload deployments receive the database settings from the
+    // server-only bundle generated in GitHub Actions. Context and process env
+    // remain supported for local/manual builds without embedded settings.
+    const env: RuntimeEnv = {
+      ...process.env,
+      ...(context.env ?? {}),
+      ...deploymentEnv(),
+    };
     const { database } = createHostedDatabase(env);
     handler = createRuntimeApp(database, env);
   }
