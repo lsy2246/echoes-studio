@@ -1,6 +1,7 @@
 import { useEffect, useId, useState, type FormEvent } from "react";
 import type {
   AutomationSettings,
+  PasswordSettings,
   RepositoryConnectionSettings,
   RepositoryConnectionTestResult,
   UpdateRepositoryConnectionInput,
@@ -23,10 +24,12 @@ interface SystemSettingsDialogProps {
   onTestRepository: (
     input: UpdateRepositoryConnectionInput,
   ) => Promise<RepositoryConnectionTestResult>;
-  onChangePassword: (
-    currentPassword: string,
-    newPassword: string,
-  ) => Promise<void>;
+  onLoadPasswordSettings: () => Promise<PasswordSettings>;
+  onSavePasswordSettings: (input: {
+    currentPassword: string;
+    newPassword?: string;
+    iterations: PasswordSettings["iterations"];
+  }) => Promise<PasswordSettings>;
   onLoadInternalToken: () => Promise<string>;
   onRotateInternalToken: () => Promise<string>;
   onClose: () => void;
@@ -103,7 +106,8 @@ export function SystemSettingsDialog({
   onLoadRepository,
   onSaveRepository,
   onTestRepository,
-  onChangePassword,
+  onLoadPasswordSettings,
+  onSavePasswordSettings,
   onLoadInternalToken,
   onRotateInternalToken,
   onClose,
@@ -129,6 +133,9 @@ export function SystemSettingsDialog({
     confirm: "",
   });
   const [passwordSaving, setPasswordSaving] = useState(false);
+  const [passwordIterations, setPasswordIterations] = useState<
+    PasswordSettings["iterations"]
+  >(100_000);
   const [passwordFeedback, setPasswordFeedback] = useState<{
     kind: "error" | "success";
     text: string;
@@ -186,6 +193,22 @@ export function SystemSettingsDialog({
       cancelled = true;
     };
   }, [onLoadRepository, onTestRepository]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void onLoadPasswordSettings()
+      .then((value) => {
+        if (!cancelled) setPasswordIterations(value.iterations);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setPasswordFeedback({ kind: "error", text: message(error) });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [onLoadPasswordSettings]);
 
   const repositoryInput = (): UpdateRepositoryConnectionInput | null => {
     const remote = repository.provider !== "filesystem";
@@ -265,7 +288,7 @@ export function SystemSettingsDialog({
   const changePassword = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setPasswordFeedback(null);
-    if (passwords.next.length < 8) {
+    if (passwords.next && passwords.next.length < 8) {
       setPasswordFeedback({ kind: "error", text: "新密码至少需要 8 个字符。" });
       return;
     }
@@ -275,11 +298,18 @@ export function SystemSettingsDialog({
     }
     setPasswordSaving(true);
     try {
-      await onChangePassword(passwords.current, passwords.next);
+      const saved = await onSavePasswordSettings({
+        currentPassword: passwords.current,
+        newPassword: passwords.next || undefined,
+        iterations: passwordIterations,
+      });
+      setPasswordIterations(saved.iterations);
       setPasswords({ current: "", next: "", confirm: "" });
       setPasswordFeedback({
         kind: "success",
-        text: "密码已修改，其他浏览器会话已失效。",
+        text: passwords.next
+          ? "密码与安全强度已更新，其他浏览器会话已失效。"
+          : "安全强度已更新，其他浏览器会话已失效。",
       });
     } catch (error) {
       setPasswordFeedback({ kind: "error", text: message(error) });
@@ -653,7 +683,7 @@ export function SystemSettingsDialog({
                   <span className="eyebrow">Security</span>
                   <h2>修改密码</h2>
                   <p>
-                    修改工作台登录密码。保存后，其他设备需要使用新密码重新登录。
+                    调整密码哈希强度，也可以同时修改登录密码。保存后，其他设备需要重新登录。
                   </p>
                 </div>
                 <form
@@ -676,6 +706,23 @@ export function SystemSettingsDialog({
                       required
                     />
                   </div>
+                  <div className="settings-field settings-field--wide">
+                    <label>密码哈希强度</label>
+                    <SelectMenu
+                      label="密码哈希强度"
+                      value={passwordIterations}
+                      disabled={passwordSaving}
+                      options={[
+                        { value: 100_000, label: "100,000 轮（默认）" },
+                        { value: 150_000, label: "150,000 轮" },
+                        { value: 210_000, label: "210,000 轮" },
+                      ]}
+                      onChange={setPasswordIterations}
+                    />
+                    <small>
+                      Cloudflare 免费 Worker 建议保持 100,000 轮；更高强度会消耗更多 CPU。
+                    </small>
+                  </div>
                   <div className="settings-field">
                     <label htmlFor="settings-new-password">新密码</label>
                     <input
@@ -690,9 +737,8 @@ export function SystemSettingsDialog({
                       }
                       autoComplete="new-password"
                       minLength={8}
-                      required
                     />
-                    <small>至少 8 个字符</small>
+                    <small>留空表示仅调整安全强度；修改时至少 8 个字符</small>
                   </div>
                   <div className="settings-field">
                     <label htmlFor="settings-confirm-password">
@@ -710,7 +756,6 @@ export function SystemSettingsDialog({
                       }
                       autoComplete="new-password"
                       minLength={8}
-                      required
                     />
                   </div>
                   <footer className="settings-form-footer">
@@ -734,7 +779,7 @@ export function SystemSettingsDialog({
                       ) : (
                         <Icon name="save" />
                       )}
-                      {passwordSaving ? "正在修改…" : "修改密码"}
+                      {passwordSaving ? "正在保存…" : "保存安全设置"}
                     </button>
                   </footer>
                 </form>

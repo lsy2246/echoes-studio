@@ -7,7 +7,11 @@ import {
 } from "../core/errors";
 import { parseFrontmatter, titleFromFrontmatter } from "../core/frontmatter";
 import { constantTimeEqual, sha256Text } from "../core/hash";
-import { hashPassword, verifyPassword } from "../core/password";
+import {
+  hashPassword,
+  isPasswordHashIterations,
+  verifyPassword,
+} from "../core/password";
 import { createAdminSession, verifyAdminSession } from "../core/session";
 import {
   RepositoryBatchContentConflictError,
@@ -371,7 +375,11 @@ export function createApp(
   async function matchesAdminPassword(password: string): Promise<boolean> {
     const stored = await options.database.getSystemSettings();
     return stored.passwordHash
-      ? verifyPassword(password, stored.passwordHash)
+      ? verifyPassword(
+          password,
+          stored.passwordHash,
+          stored.passwordHashIterations,
+        )
       : Boolean(
           options.adminToken && constantTimeEqual(password, options.adminToken),
         );
@@ -680,7 +688,10 @@ export function createApp(
           ),
         });
       }
-      const passwordHash = await hashPassword(password);
+      const passwordHash = await hashPassword(
+        password,
+        current.passwordHashIterations,
+      );
       await options.database.updateSystemSettings({
         passwordHash,
         installationSecret: current.installationSecret,
@@ -795,18 +806,27 @@ export function createApp(
     }
 
     if (path === "/api/settings/password") {
-      if (request.method !== "POST") methodNotAllowed(["POST"]);
+      if (request.method === "GET") {
+        const settings = await options.database.getSystemSettings();
+        return json({
+          data: { iterations: settings.passwordHashIterations },
+        });
+      }
+      if (request.method !== "POST") methodNotAllowed(["GET", "POST"]);
       const body = await readJson(request, Math.min(maxBodyBytes, 8192));
       const currentPassword = requiredString(
         body.currentPassword,
         "currentPassword",
         { max: 1024 },
       );
-      const newPassword = requiredString(body.newPassword, "newPassword", {
-        max: 1024,
-      });
+      const newPassword = body.newPassword === undefined || body.newPassword === ""
+        ? currentPassword
+        : requiredString(body.newPassword, "newPassword", { max: 1024 });
       if (newPassword.length < 8)
         throw badRequest("newPassword must contain at least 8 characters");
+      if (!isPasswordHashIterations(body.iterations)) {
+        throw badRequest("iterations must be a supported password hash cost");
+      }
       if (!(await matchesAdminPassword(currentPassword))) {
         throw new AppError(
           401,
@@ -814,8 +834,12 @@ export function createApp(
           "Current password is incorrect",
         );
       }
-      const passwordHash = await hashPassword(newPassword);
-      await options.database.updateSystemSettings({ passwordHash, now: now() });
+      const passwordHash = await hashPassword(newPassword, body.iterations);
+      await options.database.updateSystemSettings({
+        passwordHash,
+        passwordHashIterations: body.iterations,
+        now: now(),
+      });
       const nextSecret = await effectiveSessionSecret();
       if (!nextSecret)
         throw new AppError(
@@ -825,7 +849,7 @@ export function createApp(
         );
       const token = await createAdminSession(nextSecret, new Date(now()));
       return json(
-        { data: { changed: true } },
+        { data: { changed: true, iterations: body.iterations } },
         {
           headers: { "set-cookie": sessionCookie(token, request) },
         },

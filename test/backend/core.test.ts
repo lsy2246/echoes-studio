@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import { parseFrontmatter } from "../../src/core/frontmatter";
 import { sha256Text, stableHash, stableStringify } from "../../src/core/hash";
+import { hashPassword, verifyPassword } from "../../src/core/password";
 import { MemoryDatabase } from "../../src/database/memory";
 
 describe("portable content primitives", () => {
@@ -15,6 +16,12 @@ describe("portable content primitives", () => {
       await sha256Text("abc"),
       "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
     );
+  });
+
+  it("uses the configured password hash cost without accepting another cost", async () => {
+    const encoded = await hashPassword("correct horse battery staple", 150_000);
+    assert.equal(await verifyPassword("correct horse battery staple", encoded, 150_000), true);
+    assert.equal(await verifyPassword("correct horse battery staple", encoded, 100_000), false);
   });
 
   it("parses safe frontmatter while preserving the body byte layout", () => {

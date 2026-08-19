@@ -15,7 +15,7 @@ describe("Node SQLite adapter", async () => {
     assert.deepEqual(await database.health(), {
       ok: true,
       adapter: "node-sqlite",
-      schemaVersion: 9,
+      schemaVersion: 10,
     });
     assert.deepEqual(await database.getAutomationSettings(), {
       autoSaveSeconds: 1,
@@ -26,6 +26,7 @@ describe("Node SQLite adapter", async () => {
     assert.deepEqual(await database.getSystemSettings(), {
       repositoryConfigJson: null,
       passwordHash: null,
+      passwordHashIterations: 100_000,
       installationSecret: null,
       internalToken: null,
       updatedAt: (await database.getSystemSettings()).updatedAt,
@@ -119,7 +120,11 @@ describe("Node SQLite adapter", async () => {
 
     const upgraded = await createNodeSqliteDatabase(filename);
     try {
-      assert.equal((await upgraded.health()).schemaVersion, 9);
+      assert.equal((await upgraded.health()).schemaVersion, 10);
+      assert.equal(
+        (await upgraded.getSystemSettings()).passwordHashIterations,
+        100_000,
+      );
       assert.equal((await upgraded.getDraft("legacy"))?.operation, "upsert");
     } finally {
       upgraded.close();

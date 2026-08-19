@@ -240,6 +240,7 @@ export class SqlDatabase implements DatabasePort {
     return {
       repositoryConfigJson: nullableText(rows[0], "repository_config_json"),
       passwordHash: nullableText(rows[0], "password_hash"),
+      passwordHashIterations: integer(rows[0], "password_hash_iterations"),
       installationSecret: nullableText(rows[0], "installation_secret"),
       internalToken: nullableText(rows[0], "internal_token"),
       updatedAt: text(rows[0], "updated_at"),
@@ -252,7 +253,7 @@ export class SqlDatabase implements DatabasePort {
     const current = await this.getSystemSettings();
     await this.executor.run(
       `UPDATE cms_system_settings
-       SET repository_config_json = ?, password_hash = ?, installation_secret = ?, internal_token = ?, updated_at = ?
+       SET repository_config_json = ?, password_hash = ?, password_hash_iterations = ?, installation_secret = ?, internal_token = ?, updated_at = ?
        WHERE id = 1`,
       [
         input.repositoryConfigJson === undefined
@@ -261,6 +262,9 @@ export class SqlDatabase implements DatabasePort {
         input.passwordHash === undefined
           ? current.passwordHash
           : input.passwordHash,
+        input.passwordHashIterations === undefined
+          ? current.passwordHashIterations
+          : input.passwordHashIterations,
         input.installationSecret === undefined
           ? current.installationSecret
           : input.installationSecret,

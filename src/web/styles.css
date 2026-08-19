@@ -5737,7 +5737,8 @@ select {
 }
 
 .settings-field input,
-.settings-edit-form .select-menu__trigger {
+.settings-edit-form .select-menu__trigger,
+.settings-password-form .select-menu__trigger {
   width: 100%;
   min-height: 42px;
   padding: 0 12px;
@@ -5752,7 +5753,8 @@ select {
 }
 
 .settings-field input:focus,
-.settings-edit-form .select-menu__trigger:focus-visible {
+.settings-edit-form .select-menu__trigger:focus-visible,
+.settings-password-form .select-menu__trigger:focus-visible {
   border-color: #2563eb;
   box-shadow: 0 0 0 3px rgb(37 99 235 / 12%);
 }
@@ -5772,7 +5774,15 @@ select {
   width: 100%;
 }
 
+.settings-password-form .select-menu {
+  width: 100%;
+}
+
 .settings-edit-form .select-menu__popover {
+  width: 100%;
+}
+
+.settings-password-form .select-menu__popover {
   width: 100%;
 }
 

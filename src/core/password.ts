@@ -1,6 +1,10 @@
 const encoder = new TextEncoder();
-const DEFAULT_ITERATIONS = 100_000;
-const MINIMUM_ITERATIONS = 100_000;
+export const DEFAULT_PASSWORD_HASH_ITERATIONS = 100_000;
+export const PASSWORD_HASH_ITERATION_OPTIONS = [100_000, 150_000, 210_000] as const;
+
+export function isPasswordHashIterations(value: unknown): value is number {
+  return PASSWORD_HASH_ITERATION_OPTIONS.some((option) => option === value);
+}
 
 function encode(bytes: Uint8Array): string {
   let binary = "";
@@ -24,16 +28,30 @@ async function derive(password: string, salt: Uint8Array, iterations: number): P
   return new Uint8Array(bits);
 }
 
-export async function hashPassword(password: string): Promise<string> {
+export async function hashPassword(
+  password: string,
+  iterations = DEFAULT_PASSWORD_HASH_ITERATIONS,
+): Promise<string> {
+  if (!isPasswordHashIterations(iterations)) {
+    throw new Error("Unsupported password hash iterations");
+  }
   const salt = crypto.getRandomValues(new Uint8Array(16));
-  const digest = await derive(password, salt, DEFAULT_ITERATIONS);
-  return `pbkdf2-sha256$${DEFAULT_ITERATIONS}$${encode(salt)}$${encode(digest)}`;
+  const digest = await derive(password, salt, iterations);
+  return `pbkdf2-sha256$${iterations}$${encode(salt)}$${encode(digest)}`;
 }
 
-export async function verifyPassword(password: string, encoded: string): Promise<boolean> {
+export async function verifyPassword(
+  password: string,
+  encoded: string,
+  expectedIterations = DEFAULT_PASSWORD_HASH_ITERATIONS,
+): Promise<boolean> {
   const [algorithm, iterationsValue, saltValue, digestValue] = encoded.split("$");
   const iterations = Number(iterationsValue);
-  if (algorithm !== "pbkdf2-sha256" || !Number.isSafeInteger(iterations) || iterations < MINIMUM_ITERATIONS) return false;
+  if (
+    algorithm !== "pbkdf2-sha256" ||
+    !isPasswordHashIterations(expectedIterations) ||
+    iterations !== expectedIterations
+  ) return false;
   try {
     const actual = await derive(password, decode(saltValue), iterations);
     const expected = decode(digestValue);

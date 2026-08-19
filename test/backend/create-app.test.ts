@@ -225,6 +225,7 @@ describe("createApp repository orchestration", () => {
     const settings = await database.getSystemSettings();
     assert.ok(settings.passwordHash);
     assert.match(settings.passwordHash ?? "", /^pbkdf2-sha256\$100000\$/);
+    assert.equal(settings.passwordHashIterations, 100_000);
     assert.match(settings.installationSecret ?? "", /^[A-Za-z0-9_-]{40,}$/);
     assert.match(settings.internalToken ?? "", /^[A-Za-z0-9_-]{40,}$/);
 
@@ -344,7 +345,8 @@ describe("createApp repository orchestration", () => {
   });
 
   it("changes the persisted password and revokes older browser sessions", async () => {
-    const app = createApp(appOptions());
+    const database = new MemoryDatabase();
+    const app = createApp(appOptions(database));
     const login = await app(
       request("/api/auth/login", {
         method: "POST",
@@ -353,6 +355,10 @@ describe("createApp repository orchestration", () => {
       }),
     );
     const oldCookie = (login.headers.get("set-cookie") ?? "").split(";", 1)[0];
+    const before = await app(
+      request("/api/settings/password", { headers: ADMIN_HEADERS }),
+    );
+    assert.equal((await payload(before)).data.iterations, 100_000);
     const changed = await app(
       request("/api/settings/password", {
         method: "POST",
@@ -360,10 +366,16 @@ describe("createApp repository orchestration", () => {
         body: JSON.stringify({
           currentPassword: "admin-secret",
           newPassword: "new-password-123",
+          iterations: 150_000,
         }),
       }),
     );
     assert.equal(changed.status, 200);
+    assert.equal((await database.getSystemSettings()).passwordHashIterations, 150_000);
+    assert.match(
+      (await database.getSystemSettings()).passwordHash ?? "",
+      /^pbkdf2-sha256\$150000\$/,
+    );
     assert.equal(
       (
         await app(

@@ -381,17 +381,25 @@ export class FetchCmsApiClient implements CmsApiClient {
     return payload.data;
   }
 
-  async changePassword(
-    currentPassword: string,
-    newPassword: string,
-  ): Promise<void> {
-    await this.#request<DataEnvelope<{ changed: boolean }>>(
-      "/settings/password",
-      {
-        method: "POST",
-        body: JSON.stringify({ currentPassword, newPassword }),
-      },
-    );
+  async getPasswordSettings() {
+    const payload = await this.#request<
+      DataEnvelope<{ iterations: 100000 | 150000 | 210000 }>
+    >("/settings/password");
+    return payload.data;
+  }
+
+  async updatePasswordSettings(input: {
+    currentPassword: string;
+    newPassword?: string;
+    iterations: 100000 | 150000 | 210000;
+  }) {
+    const payload = await this.#request<
+      DataEnvelope<{ changed: boolean; iterations: 100000 | 150000 | 210000 }>
+    >("/settings/password", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+    return { iterations: payload.data.iterations };
   }
 
   async getInternalToken(): Promise<string> {

@@ -978,10 +978,21 @@ export function CmsApp({ apiClient }: CmsAppProps) {
     [client],
   );
 
-  const changeAdminPassword = useCallback(
-    async (currentPassword: string, newPassword: string) => {
-      if (!client.changePassword) throw new Error("当前后端不支持修改密码。");
-      await client.changePassword(currentPassword, newPassword);
+  const loadPasswordSettings = useCallback(async () => {
+    if (!client.getPasswordSettings)
+      throw new Error("当前后端不支持安全设置。");
+    return client.getPasswordSettings();
+  }, [client]);
+
+  const savePasswordSettings = useCallback(
+    async (
+      input: Parameters<
+        NonNullable<CmsApiClient["updatePasswordSettings"]>
+      >[0],
+    ) => {
+      if (!client.updatePasswordSettings)
+        throw new Error("当前后端不支持安全设置。");
+      return client.updatePasswordSettings(input);
     },
     [client],
   );
@@ -1813,7 +1824,8 @@ export function CmsApp({ apiClient }: CmsAppProps) {
           onLoadRepository={loadRepositorySettings}
           onSaveRepository={saveRepositorySettings}
           onTestRepository={testRepositorySettings}
-          onChangePassword={changeAdminPassword}
+          onLoadPasswordSettings={loadPasswordSettings}
+          onSavePasswordSettings={savePasswordSettings}
           onLoadInternalToken={loadInternalToken}
           onRotateInternalToken={rotateInternalToken}
           onClose={() => setSettingsOpen(false)}

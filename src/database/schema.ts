@@ -109,6 +109,7 @@ CREATE TABLE IF NOT EXISTS cms_system_settings (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   repository_config_json TEXT,
   password_hash TEXT,
+  password_hash_iterations INTEGER NOT NULL DEFAULT 100000 CHECK (password_hash_iterations IN (100000, 150000, 210000)),
   installation_secret TEXT,
   internal_token TEXT,
   updated_at TEXT NOT NULL
@@ -118,7 +119,7 @@ VALUES (1, NULL, NULL, CURRENT_TIMESTAMP)
 ON CONFLICT(id) DO NOTHING;
 
 INSERT INTO cms_schema_version(version, applied_at)
-VALUES (9, CURRENT_TIMESTAMP) ON CONFLICT(version) DO NOTHING;
+VALUES (10, CURRENT_TIMESTAMP) ON CONFLICT(version) DO NOTHING;
 `;
 
 export const POSTGRES_SCHEMA_V1 = `
@@ -233,12 +234,15 @@ CREATE TABLE IF NOT EXISTS cms_system_settings (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   repository_config_json TEXT,
   password_hash TEXT,
+  password_hash_iterations INTEGER NOT NULL DEFAULT 100000 CHECK (password_hash_iterations IN (100000, 150000, 210000)),
   installation_secret TEXT,
   internal_token TEXT,
   updated_at TEXT NOT NULL
 );
 ALTER TABLE cms_system_settings ADD COLUMN IF NOT EXISTS installation_secret TEXT;
 ALTER TABLE cms_system_settings ADD COLUMN IF NOT EXISTS internal_token TEXT;
+ALTER TABLE cms_system_settings ADD COLUMN IF NOT EXISTS password_hash_iterations INTEGER NOT NULL DEFAULT 100000
+  CHECK (password_hash_iterations IN (100000, 150000, 210000));
 INSERT INTO cms_system_settings (
   id, repository_config_json, password_hash, installation_secret, internal_token, updated_at
 )
@@ -246,5 +250,5 @@ VALUES (1, NULL, NULL, NULL, NULL, CURRENT_TIMESTAMP::TEXT)
 ON CONFLICT(id) DO NOTHING;
 
 INSERT INTO cms_schema_version(version, applied_at)
-VALUES (9, CURRENT_TIMESTAMP::TEXT) ON CONFLICT(version) DO NOTHING;
+VALUES (10, CURRENT_TIMESTAMP::TEXT) ON CONFLICT(version) DO NOTHING;
 `;

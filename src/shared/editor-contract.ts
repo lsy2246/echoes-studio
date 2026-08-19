@@ -190,6 +190,10 @@ export interface AutomationSettings {
   updatedAt: string;
 }
 
+export interface PasswordSettings {
+  iterations: 100000 | 150000 | 210000;
+}
+
 /**
  * The web app depends on this port rather than a particular backend runtime.
  * Tests and alternative deployments can inject their own implementation.
@@ -218,7 +222,12 @@ export interface CmsApiClient {
   testRepositorySettings?(
     input: UpdateRepositoryConnectionInput,
   ): Promise<RepositoryConnectionTestResult>;
-  changePassword?(currentPassword: string, newPassword: string): Promise<void>;
+  getPasswordSettings?(): Promise<PasswordSettings>;
+  updatePasswordSettings?(input: {
+    currentPassword: string;
+    newPassword?: string;
+    iterations: PasswordSettings["iterations"];
+  }): Promise<PasswordSettings>;
   getInternalToken?(): Promise<string>;
   rotateInternalToken?(): Promise<string>;
   listConflicts(): Promise<ContentConflict[]>;

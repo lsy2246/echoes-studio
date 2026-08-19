@@ -46,6 +46,7 @@ export class MemoryDatabase implements DatabasePort {
   private systemSettings: SystemSettings = {
     repositoryConfigJson: null,
     passwordHash: null,
+    passwordHashIterations: 100_000,
     installationSecret: null,
     internalToken: null,
     updatedAt: new Date(0).toISOString(),
@@ -94,6 +95,10 @@ export class MemoryDatabase implements DatabasePort {
         input.passwordHash === undefined
           ? this.systemSettings.passwordHash
           : input.passwordHash,
+      passwordHashIterations:
+        input.passwordHashIterations === undefined
+          ? this.systemSettings.passwordHashIterations
+          : input.passwordHashIterations,
       installationSecret:
         input.installationSecret === undefined
           ? this.systemSettings.installationSecret

@@ -247,6 +247,7 @@ export interface UpdateAutomationSettingsInput {
 export interface SystemSettings {
   repositoryConfigJson: string | null;
   passwordHash: string | null;
+  passwordHashIterations: number;
   installationSecret: string | null;
   internalToken: string | null;
   updatedAt: string;
@@ -255,6 +256,7 @@ export interface SystemSettings {
 export interface UpdateSystemSettingsInput {
   repositoryConfigJson?: string | null;
   passwordHash?: string | null;
+  passwordHashIterations?: number;
   installationSecret?: string | null;
   internalToken?: string | null;
   now: string;
