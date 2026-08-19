@@ -58,6 +58,53 @@ const EXACT_MESSAGE_TRANSLATIONS: Record<string, string> = {
   "Resolve the open content conflict before discarding the draft": "请先处理当前内容冲突，再撤销改动。",
 };
 
+type RepositoryOperation = "status" | "sync" | "publish" | "delete";
+
+export function repositoryErrorMessage(
+  error: unknown,
+  operation: RepositoryOperation = "sync",
+): string {
+  const raw = (error instanceof Error ? error.message : String(error ?? "")).trim();
+  if (raw && /[\u3400-\u9fff]/u.test(raw)) return raw;
+  if (/\b(?:401|bad credentials|authentication failed|requires authentication)\b/i.test(raw)) {
+    return "仓库凭证无效，请在仓库连接中重新填写 Token。";
+  }
+  if (/rate limit|secondary rate/i.test(raw)) {
+    return "仓库 API 请求次数已达上限，请稍后再试。";
+  }
+  if (/\b403\b|insufficient permission|permission denied|forbidden/i.test(raw)) {
+    return "仓库 Token 权限不足，请授予目标仓库的 Contents 读写权限。";
+  }
+  if (/content directory|content_root|cms_content_root/i.test(raw)) {
+    return "文章目录不存在，请检查仓库连接中的文章目录设置。";
+  }
+  if (/default branch|branch .* did not return|branch .* not found/i.test(raw)) {
+    return "仓库分支不存在或无法读取，请检查分支设置。";
+  }
+  if (/\b404\b|not found/i.test(raw)) {
+    return "仓库不存在或当前 Token 无权访问，请检查仓库地址和权限。";
+  }
+  if (/archive.*(?:empty|truncated|missing|exceed|limit|download)|compressed archive|expanded archive/i.test(raw)) {
+    return "仓库归档无法完整读取或体积过大，请缩小仓库或文章目录后重试。";
+  }
+  if (/article .* exceeds|payload too large/i.test(raw)) {
+    return "仓库中存在超过大小限制的文章，请缩小该文件后重试。";
+  }
+  if (/fetch failed|network|timed? ?out|timeout|econn/i.test(raw)) {
+    return "无法连接仓库服务，请检查网络后重试。";
+  }
+  if (/repository changed|synchronize|sync.*retry/i.test(raw)) {
+    return "远端仓库已发生变化，请先拉取最新内容后再操作。";
+  }
+  const fallback: Record<RepositoryOperation, string> = {
+    status: "无法读取仓库状态，请检查仓库连接配置。",
+    sync: "仓库拉取失败，请检查仓库连接配置后重试。",
+    publish: "内容推送失败，请检查仓库连接和写入权限。",
+    delete: "文章删除推送失败，请检查仓库连接和写入权限。",
+  };
+  return fallback[operation];
+}
+
 export function localizeErrorMessage(error: {
   code?: string;
   status?: number;
@@ -71,7 +118,21 @@ export function localizeErrorMessage(error: {
   if (raw && /version is stale|changed while|changed concurrently/i.test(raw)) {
     return "内容已在其他位置更新，请刷新或处理冲突后重试。";
   }
-  if (raw && /repository/i.test(raw)) return "仓库操作失败，请拉取最新内容后重试。";
+  if (raw && /repository synchronization failed/i.test(raw)) {
+    return repositoryErrorMessage(raw, "sync");
+  }
+  if (raw && /repository status is unavailable/i.test(raw)) {
+    return repositoryErrorMessage(raw, "status");
+  }
+  if (raw && /repository publish failed/i.test(raw)) {
+    return repositoryErrorMessage(raw, "publish");
+  }
+  if (raw && /repository deletion failed/i.test(raw)) {
+    return repositoryErrorMessage(raw, "delete");
+  }
+  if (raw && /(?:github|gitee|repository|archive|content directory)/i.test(raw)) {
+    return repositoryErrorMessage(raw);
+  }
   const statusCode = error.status === 401 ? "unauthorized"
     : error.status === 403 ? "forbidden"
     : error.status === 404 ? "not_found"

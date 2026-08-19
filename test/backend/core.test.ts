@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { parseFrontmatter } from "../../src/core/frontmatter";
+import { localizeErrorMessage, repositoryErrorMessage } from "../../src/core/errors";
 import { sha256Text, stableHash, stableStringify } from "../../src/core/hash";
 import { hashPassword, verifyPassword } from "../../src/core/password";
 import { MemoryDatabase } from "../../src/database/memory";
@@ -22,6 +23,25 @@ describe("portable content primitives", () => {
     const encoded = await hashPassword("correct horse battery staple", 150_000);
     assert.equal(await verifyPassword("correct horse battery staple", encoded, 150_000), true);
     assert.equal(await verifyPassword("correct horse battery staple", encoded, 100_000), false);
+  });
+
+  it("keeps repository failures specific and actionable", () => {
+    assert.equal(
+      repositoryErrorMessage(new Error("GitHub API failed (401): Bad credentials")),
+      "仓库凭证无效，请在仓库连接中重新填写 Token。",
+    );
+    assert.equal(
+      repositoryErrorMessage(new Error("Configured content directory posts does not exist")),
+      "文章目录不存在，请检查仓库连接中的文章目录设置。",
+    );
+    assert.equal(
+      repositoryErrorMessage(new Error("GitHub API failed (403): API rate limit exceeded")),
+      "仓库 API 请求次数已达上限，请稍后再试。",
+    );
+    assert.equal(
+      localizeErrorMessage({ message: "Repository publish failed", status: 502 }),
+      "内容推送失败，请检查仓库连接和写入权限。",
+    );
   });
 
   it("parses safe frontmatter while preserving the body byte layout", () => {

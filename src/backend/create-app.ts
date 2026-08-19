@@ -4,6 +4,7 @@ import {
   conflict,
   localizeErrorMessage,
   notFound,
+  repositoryErrorMessage,
 } from "../core/errors";
 import { parseFrontmatter, titleFromFrontmatter } from "../core/frontmatter";
 import { constantTimeEqual, sha256Text } from "../core/hash";
@@ -557,7 +558,7 @@ export function createApp(
       throw new AppError(
         502,
         "bad_gateway",
-        "Repository synchronization failed",
+        repositoryErrorMessage(error, "sync"),
       );
     }
   }
@@ -924,11 +925,11 @@ export function createApp(
       if (request.method !== "GET") methodNotAllowed(["GET"]);
       try {
         return json({ data: await options.repository.status() });
-      } catch {
+      } catch (error) {
         throw new AppError(
           502,
           "bad_gateway",
-          "Repository status is unavailable",
+          repositoryErrorMessage(error, "status"),
         );
       }
     }
@@ -1828,7 +1829,11 @@ export function createApp(
               },
             );
           }
-          throw new AppError(502, "bad_gateway", "Repository deletion failed");
+          throw new AppError(
+            502,
+            "bad_gateway",
+            repositoryErrorMessage(error, "delete"),
+          );
         }
         if (
           !(await options.database.deleteArticle(articleId, article.version))
@@ -1911,7 +1916,11 @@ export function createApp(
             conflictId: recorded.id,
           });
         }
-        throw new AppError(502, "bad_gateway", "Repository publish failed");
+        throw new AppError(
+          502,
+          "bad_gateway",
+          repositoryErrorMessage(error, "publish"),
+        );
       }
       const invalidResult = async (message: string): Promise<never> => {
         await options.database.completePublication({
