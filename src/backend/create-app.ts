@@ -783,28 +783,6 @@ export function createApp(
 
     await authorize(request, "admin");
 
-    if (path === "/api/settings/internal-token") {
-      if (request.method === "GET") {
-        return json({ data: { token: await effectiveInternalToken() } });
-      }
-      if (request.method === "POST") {
-        if (options.internalToken) {
-          throw new AppError(
-            409,
-            "conflict",
-            "Internal token is managed by the deployment environment",
-          );
-        }
-        const settings = await options.database.updateSystemSettings({
-          internalToken: randomSecret(),
-          now: now(),
-        });
-        generatedSecretsPromise = Promise.resolve(settings);
-        return json({ data: { token: settings.internalToken } });
-      }
-      methodNotAllowed(["GET", "POST"]);
-    }
-
     if (path === "/api/settings/password") {
       if (request.method === "GET") {
         const settings = await options.database.getSystemSettings();

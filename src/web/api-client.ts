@@ -402,23 +402,6 @@ export class FetchCmsApiClient implements CmsApiClient {
     return { iterations: payload.data.iterations };
   }
 
-  async getInternalToken(): Promise<string> {
-    const payload = await this.#request<DataEnvelope<{ token: string }>>(
-      "/settings/internal-token",
-    );
-    return payload.data.token;
-  }
-
-  async rotateInternalToken(): Promise<string> {
-    const payload = await this.#request<DataEnvelope<{ token: string }>>(
-      "/settings/internal-token",
-      {
-        method: "POST",
-      },
-    );
-    return payload.data.token;
-  }
-
   async listConflicts(): Promise<ContentConflict[]> {
     const payload =
       await this.#request<DataEnvelope<ContentConflict[]>>("/conflicts");

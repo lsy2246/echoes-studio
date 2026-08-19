@@ -238,25 +238,6 @@ describe("createApp repository orchestration", () => {
         .status,
       200,
     );
-    const tokenResponse = await app(
-      request("/api/settings/internal-token", { headers: { cookie } }),
-    );
-    assert.equal(tokenResponse.status, 200);
-    assert.equal(
-      (await payload(tokenResponse)).data.token,
-      settings.internalToken,
-    );
-    const rotated = await app(
-      request("/api/settings/internal-token", {
-        method: "POST",
-        headers: { cookie },
-      }),
-    );
-    assert.equal(rotated.status, 200);
-    assert.notEqual(
-      (await payload(rotated)).data.token,
-      settings.internalToken,
-    );
     assert.equal(
       (await payload(await app(request("/api/setup/status")))).data.required,
       false,

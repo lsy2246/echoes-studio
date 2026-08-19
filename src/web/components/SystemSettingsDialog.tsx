@@ -30,8 +30,6 @@ interface SystemSettingsDialogProps {
     newPassword?: string;
     iterations: PasswordSettings["iterations"];
   }) => Promise<PasswordSettings>;
-  onLoadInternalToken: () => Promise<string>;
-  onRotateInternalToken: () => Promise<string>;
   onClose: () => void;
 }
 
@@ -108,8 +106,6 @@ export function SystemSettingsDialog({
   onTestRepository,
   onLoadPasswordSettings,
   onSavePasswordSettings,
-  onLoadInternalToken,
-  onRotateInternalToken,
   onClose,
 }: SystemSettingsDialogProps) {
   const titleId = useId();
@@ -140,8 +136,6 @@ export function SystemSettingsDialog({
     kind: "error" | "success";
     text: string;
   } | null>(null);
-  const [internalToken, setInternalToken] = useState("");
-  const [internalTokenBusy, setInternalTokenBusy] = useState(false);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -315,28 +309,6 @@ export function SystemSettingsDialog({
       setPasswordFeedback({ kind: "error", text: message(error) });
     } finally {
       setPasswordSaving(false);
-    }
-  };
-
-  const revealInternalToken = async () => {
-    setInternalTokenBusy(true);
-    try {
-      setInternalToken(await onLoadInternalToken());
-    } catch (error) {
-      setRepositoryFeedback({ kind: "error", text: message(error) });
-    } finally {
-      setInternalTokenBusy(false);
-    }
-  };
-
-  const rotateInternalToken = async () => {
-    setInternalTokenBusy(true);
-    try {
-      setInternalToken(await onRotateInternalToken());
-    } catch (error) {
-      setRepositoryFeedback({ kind: "error", text: message(error) });
-    } finally {
-      setInternalTokenBusy(false);
     }
   };
 
@@ -623,55 +595,6 @@ export function SystemSettingsDialog({
                       <span className="spinner" />
                       正在保存设置…
                     </p>
-                  ) : null}
-                </section>
-                <section className="settings-panel settings-panel--form">
-                  <div className="settings-row">
-                    <span>
-                      <strong>外部调度令牌</strong>
-                      <small>
-                        仅 EdgeOne、Vercel 等外部定时器调用自动拉取接口时需要。
-                      </small>
-                    </span>
-                    <button
-                      className="button button--quiet"
-                      type="button"
-                      disabled={internalTokenBusy}
-                      onClick={() => void revealInternalToken()}
-                    >
-                      {internalTokenBusy ? (
-                        <span className="spinner" />
-                      ) : (
-                        <Icon name="preview" />
-                      )}
-                      {internalToken ? "重新显示" : "显示令牌"}
-                    </button>
-                  </div>
-                  {internalToken ? (
-                    <div className="settings-field settings-field--wide">
-                      <label htmlFor="settings-internal-token">
-                        已自动生成
-                      </label>
-                      <input
-                        id="settings-internal-token"
-                        value={internalToken}
-                        readOnly
-                        onFocus={(event) => event.currentTarget.select()}
-                      />
-                      <small>
-                        复制到受信任调度器的 Bearer
-                        Token。重新生成后，旧令牌立即失效。
-                      </small>
-                      <button
-                        className="button button--quiet"
-                        type="button"
-                        disabled={internalTokenBusy}
-                        onClick={() => void rotateInternalToken()}
-                      >
-                        <Icon name="refresh" />
-                        重新生成
-                      </button>
-                    </div>
                   ) : null}
                 </section>
               </>

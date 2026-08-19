@@ -228,8 +228,6 @@ export interface CmsApiClient {
     newPassword?: string;
     iterations: PasswordSettings["iterations"];
   }): Promise<PasswordSettings>;
-  getInternalToken?(): Promise<string>;
-  rotateInternalToken?(): Promise<string>;
   listConflicts(): Promise<ContentConflict[]>;
   resolveConflict(
     id: string,

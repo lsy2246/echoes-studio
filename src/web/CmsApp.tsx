@@ -997,18 +997,6 @@ export function CmsApp({ apiClient }: CmsAppProps) {
     [client],
   );
 
-  const loadInternalToken = useCallback(async () => {
-    if (!client.getInternalToken)
-      throw new Error("当前后端不支持外部调度令牌。");
-    return client.getInternalToken();
-  }, [client]);
-
-  const rotateInternalToken = useCallback(async () => {
-    if (!client.rotateInternalToken)
-      throw new Error("当前后端不支持重新生成调度令牌。");
-    return client.rotateInternalToken();
-  }, [client]);
-
   const resolveConflict = useCallback(
     async (
       conflictId: string,
@@ -1826,8 +1814,6 @@ export function CmsApp({ apiClient }: CmsAppProps) {
           onTestRepository={testRepositorySettings}
           onLoadPasswordSettings={loadPasswordSettings}
           onSavePasswordSettings={savePasswordSettings}
-          onLoadInternalToken={loadInternalToken}
-          onRotateInternalToken={rotateInternalToken}
           onClose={() => setSettingsOpen(false)}
         />
       ) : null}
