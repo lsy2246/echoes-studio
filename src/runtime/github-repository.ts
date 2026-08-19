@@ -12,6 +12,7 @@ import type {
 } from "../core/git-repository-port.ts";
 import { RepositoryBatchContentConflictError, RepositoryContentConflictError } from "../core/git-repository-port.ts";
 import { sha256Text } from "../core/hash.ts";
+import { walkTarArchive } from "./tar-archive.ts";
 
 interface GitHubRepositoryOptions {
   owner: string;
@@ -39,24 +40,6 @@ interface GitHubRefPayload {
 interface GitHubCommitPayload {
   sha?: string;
   tree?: { sha?: string };
-}
-
-interface GitHubTreeEntry {
-  path?: string;
-  type?: string;
-  sha?: string;
-  size?: number;
-}
-
-interface GitHubTreePayload {
-  tree?: GitHubTreeEntry[];
-  truncated?: boolean;
-}
-
-interface GitHubBlobPayload {
-  content?: string;
-  encoding?: string;
-  size?: number;
 }
 
 interface GitHubRepositoryPayload {
@@ -90,6 +73,8 @@ interface GitHubPullPayload {
 const DEFAULT_API_BASE = "https://api.github.com";
 const DEFAULT_CONTENT_ROOT = "src/content";
 const DEFAULT_MAX_ARTICLE_BYTES = 1024 * 1024;
+const MAX_COMPRESSED_ARCHIVE_BYTES = 24 * 1024 * 1024;
+const MAX_EXPANDED_ARCHIVE_BYTES = 64 * 1024 * 1024;
 
 function trimSlashes(value: string): string {
   return value.trim().replace(/^\/+|\/+$/g, "");
@@ -149,6 +134,51 @@ async function mapConcurrent<T, R>(
   });
   await Promise.all(workers);
   return result;
+}
+
+async function readLimited(
+  stream: ReadableStream<Uint8Array>,
+  limit: number,
+  label: string,
+): Promise<Uint8Array> {
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    length += value.byteLength;
+    if (length > limit) {
+      await reader.cancel();
+      throw new Error(`${label} exceeds the ${limit}-byte limit`);
+    }
+    chunks.push(value);
+  }
+  const result = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) {
+    result.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return result;
+}
+
+async function expandTarArchive(response: Response): Promise<Uint8Array> {
+  if (!response.body) throw new Error("GitHub archive response was empty");
+  const compressed = await readLimited(
+    response.body,
+    MAX_COMPRESSED_ARCHIVE_BYTES,
+    "GitHub compressed archive",
+  );
+  if (compressed[0] !== 0x1f || compressed[1] !== 0x8b) return compressed;
+  const archiveBuffer = new ArrayBuffer(compressed.byteLength);
+  new Uint8Array(archiveBuffer).set(compressed);
+  const source = new Blob([archiveBuffer]).stream();
+  return readLimited(
+    source.pipeThrough(new DecompressionStream("gzip")),
+    MAX_EXPANDED_ARCHIVE_BYTES,
+    "GitHub expanded archive",
+  );
 }
 
 /** GitHub REST implementation owned entirely by Echoes Studio. */
@@ -215,6 +245,18 @@ export function createGitHubRepository(options: GitHubRepositoryOptions): GitRep
     return { response, payload: payload as T | null };
   }
 
+  async function archive(commitSha: string): Promise<Uint8Array> {
+    const response = await request(
+      `${apiBase}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}/tarball/${encodeURIComponent(commitSha)}`,
+      { headers: await headers(false), redirect: "follow" },
+    );
+    if (!response.ok) {
+      const message = (await response.text()).slice(0, 300) || "unknown error";
+      throw new Error(`GitHub archive download failed (${response.status}): ${message}`);
+    }
+    return expandTarArchive(response);
+  }
+
   async function defaultBranch(): Promise<string> {
     if (resolvedDefaultBranch) return resolvedDefaultBranch;
     const { payload } = await call<GitHubRepositoryPayload>(
@@ -234,58 +276,35 @@ export function createGitHubRepository(options: GitHubRepositoryOptions): GitRep
     return sha;
   }
 
-  async function articleSource(blob: GitHubTreeEntry): Promise<string> {
-    if (!blob.sha) throw new Error(`GitHub tree entry ${blob.path ?? "<unknown>"} has no blob SHA`);
-    if (typeof blob.size === "number" && blob.size > maxArticleBytes) {
-      throw new Error(`Article ${blob.path} exceeds the ${maxArticleBytes}-byte limit`);
-    }
-    const { payload } = await call<GitHubBlobPayload>(
-      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}/git/blobs/${encodeURIComponent(blob.sha)}`,
-    );
-    if (typeof payload?.content !== "string" || payload.encoding !== "base64") {
-      throw new Error(`GitHub blob ${blob.path} is not base64 content`);
-    }
-    const size = payload.size ?? decodeBase64(payload.content).byteLength;
-    if (size > maxArticleBytes) throw new Error(`Article ${blob.path} exceeds the ${maxArticleBytes}-byte limit`);
-    return decodeUtf8Base64(payload.content);
-  }
-
   async function snapshot(): Promise<RepositorySnapshot> {
     const branch = await defaultBranch();
     const commitSha = await headCommit(branch);
-    const { payload: commit } = await call<GitHubCommitPayload>(
-      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}/git/commits/${encodeURIComponent(commitSha)}`,
-    );
-    if (!commit?.tree?.sha) throw new Error("GitHub commit did not return a tree SHA");
-    let contentTreeSha = commit.tree.sha;
-    for (const segment of contentRoot.split("/")) {
-      const { payload: parentTree } = await call<GitHubTreePayload>(
-        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}/git/trees/${encodeURIComponent(contentTreeSha)}`,
-      );
-      const child = parentTree?.tree?.find((entry) =>
-        entry.type === "tree" && entry.path === segment && typeof entry.sha === "string"
-      );
-      if (!child?.sha) {
-        throw new Error(`Configured content directory ${contentRoot} does not exist at ${commitSha}`);
+    const bytes = await archive(commitSha);
+    const articles: RepositoryArticle[] = [];
+    let contentRootFound = false;
+    walkTarArchive(bytes, (entry) => {
+      const normalized = entry.path.replace(/^\.\//, "");
+      const slash = normalized.indexOf("/");
+      if (slash < 0) return;
+      const path = normalized.slice(slash + 1);
+      if (path === contentRoot || path.startsWith(`${contentRoot}/`)) {
+        contentRootFound = true;
       }
-      contentTreeSha = child.sha;
+      if (entry.type !== "file" || !/\.(?:md|mdx)$/i.test(path)) return;
+      if (!path.startsWith(`${contentRoot}/`)) return;
+      if (entry.data.byteLength > maxArticleBytes) {
+        throw new Error(`Article ${path} exceeds the ${maxArticleBytes}-byte limit`);
+      }
+      articles.push({
+        path,
+        source: new TextDecoder("utf-8", { fatal: true }).decode(entry.data),
+        format: path.toLowerCase().endsWith(".mdx") ? "mdx" : "md",
+      });
+    });
+    if (!contentRootFound) {
+      throw new Error(`Configured content directory ${contentRoot} does not exist at ${commitSha}`);
     }
-    const { payload: tree } = await call<GitHubTreePayload>(
-      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}/git/trees/${encodeURIComponent(contentTreeSha)}?recursive=1`,
-    );
-    if (!tree?.tree) throw new Error("GitHub tree response was empty");
-    if (tree.truncated) {
-      throw new Error(`GitHub truncated the ${contentRoot} content tree; split the content collection before syncing`);
-    }
-    const blobs = tree.tree
-      .filter((entry) => entry.type === "blob" && Boolean(entry.path) && /\.(?:md|mdx)$/i.test(entry.path!))
-      .map((entry) => ({ ...entry, path: `${contentRoot}/${entry.path}` }))
-      .sort((left, right) => left.path!.localeCompare(right.path!));
-    const articles = await mapConcurrent(blobs, blobConcurrency, async (blob): Promise<RepositoryArticle> => ({
-      path: blob.path!,
-      source: await articleSource(blob),
-      format: blob.path!.toLowerCase().endsWith(".mdx") ? "mdx" : "md",
-    }));
+    articles.sort((left, right) => left.path.localeCompare(right.path));
     lastCheckedAt = now().toISOString();
     return { repositoryId, branch, headCommit: commitSha, articles };
   }

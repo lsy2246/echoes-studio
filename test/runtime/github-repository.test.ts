@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { gzipSync } from "node:zlib";
 
 import { createGitHubRepository } from "../../src/runtime/github-repository";
 import type { RepositoryPublishRequest } from "../../src/core/git-repository-port";
@@ -16,10 +17,45 @@ interface MockRoute {
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
+  if (body instanceof Uint8Array) {
+    const buffer = new ArrayBuffer(body.byteLength);
+    new Uint8Array(buffer).set(body);
+    return new Response(buffer, {
+      status,
+      headers: { "content-type": "application/x-gzip" },
+    });
+  }
   return new Response(JSON.stringify(body), {
     status,
     headers: { "content-type": "application/json" },
   });
+}
+
+function tarGzip(files: Record<string, string>): Uint8Array {
+  const chunks: Buffer[] = [];
+  for (const [path, source] of Object.entries(files)) {
+    const data = Buffer.from(source, "utf8");
+    const header = Buffer.alloc(512);
+    header.write(`echoes-site-head/${path}`, 0, 100, "utf8");
+    header.write("0000644\0", 100, 8, "ascii");
+    header.write("0000000\0", 108, 8, "ascii");
+    header.write("0000000\0", 116, 8, "ascii");
+    header.write(`${data.byteLength.toString(8).padStart(11, "0")}\0`, 124, 12, "ascii");
+    header.write("00000000000\0", 136, 12, "ascii");
+    header.fill(0x20, 148, 156);
+    header[156] = "0".charCodeAt(0);
+    header.write("ustar\0", 257, 6, "ascii");
+    header.write("00", 263, 2, "ascii");
+    const checksum = header.reduce((sum, value) => sum + value, 0);
+    header.write(`${checksum.toString(8).padStart(6, "0")}\0 `, 148, 8, "ascii");
+    chunks.push(
+      header,
+      data,
+      Buffer.alloc((512 - (data.byteLength % 512)) % 512),
+    );
+  }
+  chunks.push(Buffer.alloc(1024));
+  return new Uint8Array(gzipSync(Buffer.concat(chunks)));
 }
 
 function createMockFetch(routes: MockRoute[]) {
@@ -104,7 +140,7 @@ describe("GitHubRepositoryPort", () => {
     mock.assertDone();
   });
 
-  it("actively snapshots the default branch, recursive tree and Markdown blobs", async () => {
+  it("downloads one repository archive instead of one request per Markdown file", async () => {
     const markdown = "---\ntitle: Alpha\n---\n\nA\n";
     const mdx = "---\ntitle: Zed\n---\n\n<Component />\n";
     const mock = createMockFetch([
@@ -117,42 +153,13 @@ describe("GitHubRepositoryPort", () => {
         body: { object: { sha: "head-1" } },
       },
       {
-        path: "/repos/echoes/site/git/commits/head-1",
-        body: { sha: "head-1", tree: { sha: "tree-1" } },
-      },
-      {
-        path: "/repos/echoes/site/git/trees/tree-1",
-        body: {
-          truncated: false,
-          tree: [{ path: "src", type: "tree", sha: "tree-src" }],
-        },
-      },
-      {
-        path: "/repos/echoes/site/git/trees/tree-src",
-        body: {
-          truncated: false,
-          tree: [{ path: "content", type: "tree", sha: "tree-content" }],
-        },
-      },
-      {
-        path: "/repos/echoes/site/git/trees/tree-content?recursive=1",
-        body: {
-          truncated: false,
-          tree: [
-            { path: "z.mdx", type: "blob", sha: "blob-z", size: 40 },
-            { path: "note.txt", type: "blob", sha: "note" },
-            { path: "a.md", type: "blob", sha: "blob-a", size: 30 },
-            { path: "nested", type: "tree", sha: "nested" },
-          ],
-        },
-      },
-      {
-        path: "/repos/echoes/site/git/blobs/blob-a",
-        body: { encoding: "base64", content: encoded(markdown), size: Buffer.byteLength(markdown) },
-      },
-      {
-        path: "/repos/echoes/site/git/blobs/blob-z",
-        body: { encoding: "base64", content: encoded(mdx), size: Buffer.byteLength(mdx) },
+        path: "/repos/echoes/site/tarball/head-1",
+        body: tarGzip({
+          "src/content/z.mdx": mdx,
+          "src/content/note.txt": "ignored",
+          "src/content/a.md": markdown,
+          "README.md": "ignored",
+        }),
       },
     ]);
     const repository = createGitHubRepository({
