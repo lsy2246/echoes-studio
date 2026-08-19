@@ -1,5 +1,6 @@
 const encoder = new TextEncoder();
-const ITERATIONS = 210_000;
+const DEFAULT_ITERATIONS = 100_000;
+const MINIMUM_ITERATIONS = 100_000;
 
 function encode(bytes: Uint8Array): string {
   let binary = "";
@@ -25,14 +26,14 @@ async function derive(password: string, salt: Uint8Array, iterations: number): P
 
 export async function hashPassword(password: string): Promise<string> {
   const salt = crypto.getRandomValues(new Uint8Array(16));
-  const digest = await derive(password, salt, ITERATIONS);
-  return `pbkdf2-sha256$${ITERATIONS}$${encode(salt)}$${encode(digest)}`;
+  const digest = await derive(password, salt, DEFAULT_ITERATIONS);
+  return `pbkdf2-sha256$${DEFAULT_ITERATIONS}$${encode(salt)}$${encode(digest)}`;
 }
 
 export async function verifyPassword(password: string, encoded: string): Promise<boolean> {
   const [algorithm, iterationsValue, saltValue, digestValue] = encoded.split("$");
   const iterations = Number(iterationsValue);
-  if (algorithm !== "pbkdf2-sha256" || !Number.isSafeInteger(iterations) || iterations < 100_000) return false;
+  if (algorithm !== "pbkdf2-sha256" || !Number.isSafeInteger(iterations) || iterations < MINIMUM_ITERATIONS) return false;
   try {
     const actual = await derive(password, decode(saltValue), iterations);
     const expected = decode(digestValue);

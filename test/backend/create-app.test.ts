@@ -224,6 +224,7 @@ describe("createApp repository orchestration", () => {
     );
     const settings = await database.getSystemSettings();
     assert.ok(settings.passwordHash);
+    assert.match(settings.passwordHash ?? "", /^pbkdf2-sha256\$100000\$/);
     assert.match(settings.installationSecret ?? "", /^[A-Za-z0-9_-]{40,}$/);
     assert.match(settings.internalToken ?? "", /^[A-Za-z0-9_-]{40,}$/);
 
