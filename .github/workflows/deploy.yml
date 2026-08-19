@@ -5,12 +5,6 @@ on:
     branches: [main]
   workflow_call:
     inputs:
-      platform:
-        required: true
-        type: string
-      database:
-        required: true
-        type: string
       environment:
         required: false
         type: string
@@ -22,16 +16,6 @@ on:
         required: false
   workflow_dispatch:
     inputs:
-      platform:
-        description: 后端运行平台
-        required: true
-        type: choice
-        options: [edgeone, vercel, cloudflare]
-      database:
-        description: 数据库驱动
-        required: true
-        type: choice
-        options: [supabase, postgres, d1]
       environment:
         description: 部署环境
         required: true
@@ -43,23 +27,19 @@ permissions:
   contents: read
 
 concurrency:
-  group: echoes-studio-deploy-${{ inputs.platform || vars.DEPLOY_PLATFORM || 'unconfigured' }}-${{ inputs.database || vars.DATABASE_DRIVER || 'unconfigured' }}-${{ inputs.environment || 'production' }}
+  group: echoes-studio-deploy-${{ github.repository }}-${{ inputs.environment || 'production' }}
   cancel-in-progress: false
 
 jobs:
   deploy:
-    if: github.event_name != 'push' || (vars.DEPLOY_PLATFORM != '' && vars.DATABASE_DRIVER != '')
+    if: github.event_name != 'push' || vars.DEPLOY_CONFIG != ''
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     env:
-      DEPLOY_PLATFORM: ${{ inputs.platform || vars.DEPLOY_PLATFORM }}
-      DATABASE_DRIVER: ${{ inputs.database || vars.DATABASE_DRIVER }}
+      DEPLOY_CONFIG: ${{ vars.DEPLOY_CONFIG }}
       DEPLOY_ENVIRONMENT: ${{ inputs.environment || 'production' }}
       DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
-      PROJECT_NAME_VALUE: ${{ vars.PROJECT_NAME }}
-      PLATFORM_ACCOUNT: ${{ vars.PLATFORM_ACCOUNT }}
-      EDGEONE_AREA_VALUE: ${{ vars.EDGEONE_AREA }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -73,80 +53,60 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: 读取部署配置
+        id: config
+        run: node deploy/resolve-config.mjs
       - run: pnpm check
 
       - name: 检查平台和数据库配置
         run: |
           set -euo pipefail
-          PROJECT_NAME_VALUE="${PROJECT_NAME_VALUE:-echoes-studio}"
-          echo "CMS_PROJECT_NAME=$PROJECT_NAME_VALUE" >> "$GITHUB_ENV"
-
-          EDGEONE_AREA_VALUE="${EDGEONE_AREA_VALUE:-overseas}"
-          case "$EDGEONE_AREA_VALUE" in
-            overseas|global) ;;
-            *) echo 'EDGEONE_AREA 只能填写 overseas 或 global。' >&2; exit 2 ;;
-          esac
-          echo "CMS_EDGEONE_AREA=$EDGEONE_AREA_VALUE" >> "$GITHUB_ENV"
-
           [[ -n "$DEPLOY_TOKEN" ]] || { echo '缺少 GitHub Secret：DEPLOY_TOKEN' >&2; exit 1; }
-
-          case "$DEPLOY_PLATFORM" in
-            edgeone|vercel|cloudflare) ;;
-            *) echo "不支持的运行平台：$DEPLOY_PLATFORM" >&2; exit 2 ;;
-          esac
 
           case "$DATABASE_DRIVER" in
             supabase|postgres)
               [[ -n "$DATABASE_URL" ]] || { echo 'PostgreSQL/Supabase 需要 GitHub Secret：DATABASE_URL' >&2; exit 1; }
-              if [[ "$DEPLOY_PLATFORM" == "cloudflare" ]]; then
-                [[ -n "$PLATFORM_ACCOUNT" ]] || { echo 'Cloudflare 还需要 GitHub Variable：PLATFORM_ACCOUNT（Account ID）' >&2; exit 1; }
-              fi
               ;;
             d1)
-              [[ "$DEPLOY_PLATFORM" == "cloudflare" ]] || { echo 'D1 binding 只能由 Cloudflare runtime 使用。' >&2; exit 1; }
-              [[ -n "$PLATFORM_ACCOUNT" ]] || { echo 'Cloudflare 还需要 GitHub Variable：PLATFORM_ACCOUNT（Account ID）' >&2; exit 1; }
               ;;
             *) echo "不支持的数据库驱动：$DATABASE_DRIVER" >&2; exit 2 ;;
           esac
 
       - name: 迁移 PostgreSQL / Supabase
-        if: env.DATABASE_DRIVER == 'supabase' || env.DATABASE_DRIVER == 'postgres'
+        if: steps.config.outputs.database == 'supabase' || steps.config.outputs.database == 'postgres'
         env:
-          CMS_DATABASE_DRIVER: ${{ env.DATABASE_DRIVER }}
+          CMS_DATABASE_DRIVER: ${{ steps.config.outputs.database }}
           CMS_DATABASE_URL: ${{ secrets.DATABASE_URL }}
           CMS_DATABASE_MIGRATE: "true"
         run: pnpm db:migrate
 
       - name: 准备 Cloudflare 数据库和部署配置
-        if: env.DEPLOY_PLATFORM == 'cloudflare'
+        if: steps.config.outputs.platform == 'cloudflare'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ vars.PLATFORM_ACCOUNT }}
         run: node deploy/cloudflare/prepare.mjs
 
       - name: 迁移 D1
-        if: env.DEPLOY_PLATFORM == 'cloudflare' && env.DATABASE_DRIVER == 'd1'
+        if: steps.config.outputs.platform == 'cloudflare' && steps.config.outputs.database == 'd1'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ vars.PLATFORM_ACCOUNT }}
         run: npx --yes wrangler@4.114.0 d1 migrations apply "$CMS_PROJECT_NAME" --remote --config .output/wrangler.toml
 
       - name: 部署 Cloudflare 后端
-        if: env.DEPLOY_PLATFORM == 'cloudflare'
+        if: steps.config.outputs.platform == 'cloudflare'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ vars.PLATFORM_ACCOUNT }}
         run: npx --yes wrangler@4.114.0 deploy --config .output/wrangler.toml
 
       - name: 配置数据库并部署 Vercel 后端
-        if: env.DEPLOY_PLATFORM == 'vercel'
+        if: steps.config.outputs.platform == 'vercel'
         env:
           DEPLOY_ENV: ${{ env.DEPLOY_ENVIRONMENT }}
         run: |
           set -euo pipefail
           scope_args=()
-          if [[ -n "$PLATFORM_ACCOUNT" ]]; then
-            scope_args+=(--scope "$PLATFORM_ACCOUNT")
+          if [[ -n "$VERCEL_SCOPE" ]]; then
+            scope_args+=(--scope "$VERCEL_SCOPE")
           fi
 
           node deploy/vercel/prepare.mjs
@@ -162,7 +122,7 @@ jobs:
           npx --yes vercel@56.5.0 "${deploy_args[@]}" "${scope_args[@]}"
 
       - name: 配置数据库并部署 EdgeOne 后端
-        if: env.DEPLOY_PLATFORM == 'edgeone'
+        if: steps.config.outputs.platform == 'edgeone'
         env:
           DEPLOY_ENV: ${{ env.DEPLOY_ENVIRONMENT }}
         run: |

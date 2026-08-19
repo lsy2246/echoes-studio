@@ -6,7 +6,7 @@ const databaseDriver = (process.env.DATABASE_DRIVER || "d1").toLowerCase();
 
 if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(projectName)) {
   throw new Error(
-    "PROJECT_NAME 只能包含小写字母、数字和连字符，且不能以连字符开头或结尾",
+    "DEPLOY_CONFIG.projectName 只能包含小写字母、数字和连字符，且不能以连字符开头或结尾",
   );
 }
 if (!["d1", "supabase", "postgres"].includes(databaseDriver)) {
