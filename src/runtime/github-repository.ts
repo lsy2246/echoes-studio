@@ -177,6 +177,7 @@ export function createGitHubRepository(options: GitHubRepositoryOptions): GitRep
     const result = new Headers({
       accept: "application/vnd.github+json",
       "content-type": "application/json",
+      "user-agent": "Echoes-Studio",
       "x-github-api-version": "2022-11-28",
     });
     const token = options.token ? await options.token() : null;

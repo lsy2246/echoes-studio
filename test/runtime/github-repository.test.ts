@@ -176,6 +176,7 @@ describe("GitHubRepositoryPort", () => {
       ],
     });
     assert.ok(mock.requests.every((request) => request.headers.get("authorization") === "Bearer read-token"));
+    assert.ok(mock.requests.every((request) => request.headers.get("user-agent") === "Echoes-Studio"));
     assert.ok(mock.requests.every((request) => request.headers.get("x-github-api-version") === "2022-11-28"));
     mock.assertDone();
   });

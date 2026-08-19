@@ -4,30 +4,18 @@ on:
   push:
     branches: [main]
   workflow_call:
-    inputs:
-      environment:
-        required: false
-        type: string
-        default: production
     secrets:
       DEPLOY_TOKEN:
         required: true
       DATABASE_URL:
         required: false
   workflow_dispatch:
-    inputs:
-      environment:
-        description: 部署环境
-        required: true
-        type: choice
-        default: production
-        options: [production, preview]
 
 permissions:
   contents: read
 
 concurrency:
-  group: echoes-studio-deploy-${{ github.repository }}-${{ inputs.environment || 'production' }}
+  group: echoes-studio-deploy-${{ github.repository }}
   cancel-in-progress: false
 
 jobs:
@@ -37,7 +25,6 @@ jobs:
     timeout-minutes: 25
     env:
       DEPLOY_CONFIG: ${{ vars.DEPLOY_CONFIG }}
-      DEPLOY_ENVIRONMENT: ${{ inputs.environment || 'production' }}
       DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
     steps:
@@ -100,8 +87,6 @@ jobs:
 
       - name: 配置数据库并部署 Vercel 后端
         if: steps.config.outputs.platform == 'vercel'
-        env:
-          DEPLOY_ENV: ${{ env.DEPLOY_ENVIRONMENT }}
         run: |
           set -euo pipefail
           scope_args=()
@@ -116,22 +101,18 @@ jobs:
           deploy_args+=(--env "CMS_DATABASE_DRIVER=$DATABASE_DRIVER")
           deploy_args+=(--env "CMS_DATABASE_URL=$DATABASE_URL")
           deploy_args+=(--env "CMS_DATABASE_MIGRATE=false")
-          if [[ "$DEPLOY_ENV" == "production" ]]; then
-            deploy_args+=(--prod)
-          fi
+          deploy_args+=(--prod)
           npx --yes vercel@56.5.0 "${deploy_args[@]}" "${scope_args[@]}"
 
       - name: 配置数据库并部署 EdgeOne 后端
         if: steps.config.outputs.platform == 'edgeone'
-        env:
-          DEPLOY_ENV: ${{ env.DEPLOY_ENVIRONMENT }}
         run: |
           set -euo pipefail
           node deploy/edgeone/prepare.mjs
           cd .output/edgeone-bundle
           for attempt in 1 2 3; do
             if npx --yes edgeone@1.6.18 makers deploy . \
-              -n "$CMS_PROJECT_NAME" -t "$DEPLOY_TOKEN" -e "$DEPLOY_ENV" \
+              -n "$CMS_PROJECT_NAME" -t "$DEPLOY_TOKEN" -e production \
               --area "$CMS_EDGEONE_AREA"; then
               exit 0
             fi

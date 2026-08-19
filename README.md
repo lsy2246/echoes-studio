@@ -88,7 +88,7 @@ edgeone:
 
 ### 4. 运行部署
 
-打开 `Actions → 部署 Echoes Studio → Run workflow`，选择 `production` 并运行。Action 根据同一份 `DEPLOY_CONFIG` 自动执行：
+打开 `Actions → 部署 Echoes Studio → Run workflow` 并运行。部署固定更新生产项目，不再要求选择环境。Action 根据同一份 `DEPLOY_CONFIG` 自动执行：
 
 | 组合                             | Action 自动处理                                                   |
 | -------------------------------- | ----------------------------------------------------------------- |
