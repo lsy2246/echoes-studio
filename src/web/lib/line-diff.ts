@@ -3,11 +3,47 @@ export interface DiffLine {
   value: string;
   oldNumber: number | null;
   newNumber: number | null;
+  /** Number of unchanged lines represented by this compact placeholder. */
+  omitted?: number;
 }
 
 export interface SplitDiffRow {
   left: DiffLine | null;
   right: DiffLine | null;
+}
+
+/** Keeps useful context around edits without burying them in an entire article. */
+export function compactDiffLines(lines: DiffLine[], context = 3): DiffLine[] {
+  const safeContext = Math.max(0, Math.floor(context));
+  const output: DiffLine[] = [];
+  let index = 0;
+  while (index < lines.length) {
+    if (lines[index].type !== "equal") {
+      output.push(lines[index]);
+      index += 1;
+      continue;
+    }
+    const start = index;
+    while (index < lines.length && lines[index].type === "equal") index += 1;
+    const run = lines.slice(start, index);
+    if (run.length <= safeContext * 2 + 1) {
+      output.push(...run);
+      continue;
+    }
+    const leading = start === 0 ? 0 : safeContext;
+    const trailing = index === lines.length ? 0 : safeContext;
+    output.push(...run.slice(0, leading));
+    const omitted = run.length - leading - trailing;
+    output.push({
+      type: "equal",
+      value: `${omitted} 行未修改内容`,
+      oldNumber: run[leading]?.oldNumber ?? null,
+      newNumber: run[leading]?.newNumber ?? null,
+      omitted,
+    });
+    if (trailing > 0) output.push(...run.slice(-trailing));
+  }
+  return output;
 }
 
 /** Pairs deletion/addition blocks so both versions remain vertically aligned. */

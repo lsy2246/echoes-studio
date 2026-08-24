@@ -22,6 +22,7 @@ import {
   CherryMarkdownAdapter,
   type CherryInstanceLike,
 } from "./cherry-adapter";
+import { extractArticleHeadings } from "../lib/article-outline";
 
 interface CherryEditorProps {
   value: string;
@@ -34,6 +35,7 @@ interface CherryEditorProps {
   onFormat?: (changed: boolean) => void;
   onFormatError?: (error: unknown) => void;
   onReady?: () => void;
+  onActiveLineChange?: (line: number) => void;
 }
 
 interface CherryOptions {
@@ -125,6 +127,7 @@ export const CherryEditor = forwardRef<MarkdownEditorDriver, CherryEditorProps>(
       onFormat,
       onFormatError,
       onReady,
+      onActiveLineChange,
     },
     forwardedRef,
   ) {
@@ -140,6 +143,8 @@ export const CherryEditor = forwardRef<MarkdownEditorDriver, CherryEditorProps>(
     const onFormatRef = useRef(onFormat);
     const onFormatErrorRef = useRef(onFormatError);
     const onReadyRef = useRef(onReady);
+    const onActiveLineChangeRef = useRef(onActiveLineChange);
+    const activeLineRef = useRef<number | null>(null);
     const [loadError, setLoadError] = useState<string | null>(null);
 
     valueRef.current = value;
@@ -150,6 +155,7 @@ export const CherryEditor = forwardRef<MarkdownEditorDriver, CherryEditorProps>(
     onFormatRef.current = onFormat;
     onFormatErrorRef.current = onFormatError;
     onReadyRef.current = onReady;
+    onActiveLineChangeRef.current = onActiveLineChange;
     useImperativeHandle(
       forwardedRef,
       (): MarkdownEditorDriver => ({
@@ -164,6 +170,11 @@ export const CherryEditor = forwardRef<MarkdownEditorDriver, CherryEditorProps>(
         insert: (source, select) => driverRef.current?.insert(source, select),
         setView: (nextView) => driverRef.current?.setView(nextView),
         focus: () => driverRef.current?.focus(),
+        focusLine: (line) => {
+          driverRef.current?.focusLine(line);
+          activeLineRef.current = line;
+          onActiveLineChangeRef.current?.(line);
+        },
         validate: () => driverRef.current?.validate() ?? validateSource(valueRef.current),
         destroy: () => driverRef.current?.destroy(),
       }),
@@ -172,6 +183,7 @@ export const CherryEditor = forwardRef<MarkdownEditorDriver, CherryEditorProps>(
 
     useLayoutEffect(() => {
       let disposed = false;
+      let stopActiveLineTracking = () => {};
       setLoadError(null);
 
       void import("cherry-markdown").then((module) => {
@@ -280,6 +292,83 @@ export const CherryEditor = forwardRef<MarkdownEditorDriver, CherryEditorProps>(
 
         const adapter = new CherryMarkdownAdapter(instance, validateSource);
         driverRef.current = adapter;
+
+        const host = hostRef.current;
+        if (!host) return;
+        const editorScroller = host.querySelector<HTMLElement>(".cm-scroller");
+        const previewScroller = host.querySelector<HTMLElement>(".cherry-previewer");
+        let activeScrollSource: "editor" | "preview" = "editor";
+        let animationFrame = 0;
+        const emitLine = (line: number | null) => {
+          if (!line || line === activeLineRef.current) return;
+          activeLineRef.current = line;
+          onActiveLineChangeRef.current?.(line);
+        };
+        const schedule = (readLine: () => number | null) => {
+          cancelAnimationFrame(animationFrame);
+          animationFrame = requestAnimationFrame(() => emitLine(readLine()));
+        };
+        const selectScrollSource = (event: Event) => {
+          if (!(event.target instanceof Element)) return;
+          if (event.target.closest(".cherry-previewer")) activeScrollSource = "preview";
+          else if (event.target.closest(".cm-editor")) activeScrollSource = "editor";
+        };
+        const followCursor = (event: Event) => {
+          if (!(event.target instanceof Element) || !event.target.closest(".cm-editor")) {
+            return;
+          }
+          activeScrollSource = "editor";
+          schedule(() => adapter.getActiveLine());
+        };
+        const followEditorScroll = () => {
+          if (activeScrollSource !== "editor") return;
+          schedule(() => adapter.getViewportLine() ?? adapter.getActiveLine());
+        };
+        const followPreviewScroll = () => {
+          if (activeScrollSource !== "preview") return;
+          schedule(() => {
+            if (!previewScroller) return adapter.getActiveLine();
+            const renderedHeadings = Array.from(
+              previewScroller.querySelectorAll<HTMLElement>("h1, h2, h3, h4, h5, h6"),
+            );
+            const sourceHeadings = extractArticleHeadings(
+              restoreNestedFencesFromCherry(instance?.getMarkdown() ?? ""),
+            );
+            if (renderedHeadings.length === 0 || sourceHeadings.length === 0) return 1;
+            if (
+              previewScroller.scrollTop > 0 &&
+              previewScroller.scrollTop + previewScroller.clientHeight >=
+              previewScroller.scrollHeight - 2
+            ) return sourceHeadings[sourceHeadings.length - 1].line;
+            const top = previewScroller.getBoundingClientRect().top + 24;
+            let activeIndex = 0;
+            renderedHeadings.forEach((heading, index) => {
+              if (heading.getBoundingClientRect().top <= top) activeIndex = index;
+            });
+            return sourceHeadings[Math.min(activeIndex, sourceHeadings.length - 1)]?.line ?? 1;
+          });
+        };
+
+        host.addEventListener("input", followCursor, true);
+        host.addEventListener("keyup", followCursor, true);
+        host.addEventListener("pointerup", followCursor, true);
+        host.addEventListener("focusin", followCursor, true);
+        host.addEventListener("wheel", selectScrollSource, { capture: true, passive: true });
+        host.addEventListener("pointerdown", selectScrollSource, true);
+        editorScroller?.addEventListener("scroll", followEditorScroll, { passive: true });
+        previewScroller?.addEventListener("scroll", followPreviewScroll, { passive: true });
+        stopActiveLineTracking = () => {
+          cancelAnimationFrame(animationFrame);
+          host.removeEventListener("input", followCursor, true);
+          host.removeEventListener("keyup", followCursor, true);
+          host.removeEventListener("pointerup", followCursor, true);
+          host.removeEventListener("focusin", followCursor, true);
+          host.removeEventListener("wheel", selectScrollSource, true);
+          host.removeEventListener("pointerdown", selectScrollSource, true);
+          editorScroller?.removeEventListener("scroll", followEditorScroll);
+          previewScroller?.removeEventListener("scroll", followPreviewScroll);
+        };
+        emitLine(adapter.getActiveLine() ?? 1);
       }).catch((error: unknown) => {
         if (disposed) return;
         setLoadError(error instanceof Error ? error.message : "Cherry Markdown 初始化失败。");
@@ -287,6 +376,7 @@ export const CherryEditor = forwardRef<MarkdownEditorDriver, CherryEditorProps>(
 
       return () => {
         disposed = true;
+        stopActiveLineTracking();
         driverRef.current?.destroy();
         driverRef.current = null;
         if (hostRef.current) hostRef.current.replaceChildren();

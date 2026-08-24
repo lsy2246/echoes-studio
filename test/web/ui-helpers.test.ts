@@ -16,6 +16,10 @@ import {
   writeMetadataToSource,
 } from "../../src/web/lib/frontmatter";
 import { formatMarkdown } from "../../src/web/lib/format-markdown";
+import {
+  activeArticleHeadingLine,
+  extractArticleHeadings,
+} from "../../src/web/lib/article-outline";
 
 function article(id: string, path: string, title = id): ArticleSummary {
   return {
@@ -105,6 +109,39 @@ test("new CMS articles omit the retired draft flag and an empty summary", () => 
   });
   assert.doesNotMatch(source, /^draft:/m);
   assert.doesNotMatch(source, /^summary:/m);
+});
+
+test("article outline follows Markdown headings but ignores frontmatter and code fences", () => {
+  const source = [
+    "---",
+    'title: "# Not a heading"',
+    "---",
+    "",
+    "# Overview",
+    "## [Setup](#setup)",
+    "```md",
+    "### Hidden example",
+    "```",
+    "### **Usage** `notes`",
+  ].join("\n");
+  assert.deepEqual(extractArticleHeadings(source), [
+    { level: 1, line: 5, text: "Overview" },
+    { level: 2, line: 6, text: "Setup" },
+    { level: 3, line: 10, text: "Usage notes" },
+  ]);
+});
+
+test("article outline selects the heading that owns the active source line", () => {
+  const headings = [
+    { level: 1, line: 5, text: "Overview" },
+    { level: 2, line: 12, text: "Setup" },
+    { level: 2, line: 28, text: "Usage" },
+  ];
+  assert.equal(activeArticleHeadingLine(headings, 1), 5);
+  assert.equal(activeArticleHeadingLine(headings, 12), 12);
+  assert.equal(activeArticleHeadingLine(headings, 27), 12);
+  assert.equal(activeArticleHeadingLine(headings, 99), 28);
+  assert.equal(activeArticleHeadingLine([], 1), null);
 });
 
 test("Prettier formats Markdown tables, lists and fenced code through its syntax tree", async () => {

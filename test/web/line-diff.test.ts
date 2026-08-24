@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
 
-import { diffLines, splitDiffRows } from "../../src/web/lib/line-diff";
+import { compactDiffLines, diffLines, splitDiffRows } from "../../src/web/lib/line-diff";
 
 it("shows stable Markdown additions and removals with line numbers", () => {
   const result = diffLines("# Title\nold\nend", "# Title\nnew\nmore\nend");
@@ -21,4 +21,19 @@ it("shows stable Markdown additions and removals with line numbers", () => {
   assert.equal(split[1].right?.value, "new");
   assert.equal(split[2].left, null);
   assert.equal(split[2].right?.value, "more");
+});
+
+it("collapses unchanged article sections while preserving edit context", () => {
+  const before = Array.from({ length: 20 }, (_, index) => `line ${index + 1}`);
+  const after = [...before];
+  after[9] = "changed";
+  const compact = compactDiffLines(diffLines(before.join("\n"), after.join("\n")), 2);
+  assert.equal(compact.filter((line) => line.omitted).length, 2);
+  assert.deepEqual(
+    compact.filter((line) => line.type !== "equal").map(({ type, value }) => ({ type, value })),
+    [
+      { type: "removed", value: "line 10" },
+      { type: "added", value: "changed" },
+    ],
+  );
 });

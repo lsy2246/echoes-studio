@@ -1,15 +1,23 @@
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState, type CSSProperties } from "react";
 import type {
   ArticleMetadata,
   EditorDiagnostic,
 } from "../../shared/editor-contract";
+import type { ArticleHeading } from "../lib/article-outline";
 import { Icon } from "./Icons";
+
+export type ArticlePanelSection = "outline" | "settings";
 
 interface MetadataPanelProps {
   metadata: ArticleMetadata;
+  headings: ArticleHeading[];
+  activeHeadingLine: number | null;
+  activeSection: ArticlePanelSection;
   tagSuggestions: string[];
   diagnostics: EditorDiagnostic[];
   disabled?: boolean;
+  onSectionChange: (section: ArticlePanelSection) => void;
+  onHeadingSelect: (line: number) => void;
   onMetadataChange: (metadata: ArticleMetadata) => void;
   onClose: () => void;
 }
@@ -40,9 +48,14 @@ function localIsoValue(date: string, time: string): string {
 
 export function MetadataPanel({
   metadata,
+  headings,
+  activeHeadingLine,
+  activeSection,
   tagSuggestions,
   diagnostics,
   disabled = false,
+  onSectionChange,
+  onHeadingSelect,
   onMetadataChange,
   onClose,
 }: MetadataPanelProps) {
@@ -50,6 +63,7 @@ export function MetadataPanel({
   const [tagInput, setTagInput] = useState("");
   const [tagMenuOpen, setTagMenuOpen] = useState(false);
   const [dateMenuOpen, setDateMenuOpen] = useState(false);
+  const outlineRef = useRef<HTMLElement>(null);
   const errors = diagnostics.filter((item) => item.severity === "error");
   const warnings = diagnostics.filter((item) => item.severity === "warning");
 
@@ -74,19 +88,79 @@ export function MetadataPanel({
     return !metadata.tags.includes(tag) && (!needle || tag.toLocaleLowerCase("zh-CN").includes(needle));
   });
   const dateParts = dateTimeParts(metadata.date);
+  const minimumHeadingLevel = headings.length
+    ? Math.min(...headings.map((heading) => heading.level))
+    : 1;
+
+  useEffect(() => {
+    if (activeSection !== "outline" || activeHeadingLine === null) return;
+    outlineRef.current
+      ?.querySelector<HTMLElement>(`[data-heading-line="${activeHeadingLine}"]`)
+      ?.scrollIntoView({ block: "nearest" });
+  }, [activeHeadingLine, activeSection]);
 
   return (
     <aside className="metadata-panel" aria-labelledby={`${id}-title`}>
       <header className="panel-heading">
         <div>
           <span className="eyebrow">Document</span>
-          <h2 id={`${id}-title`}>文章设置</h2>
+          <h2 id={`${id}-title`}>{activeSection === "outline" ? "文章目录" : "文章设置"}</h2>
         </div>
         <button type="button" className="icon-button metadata-close" onClick={onClose} aria-label="关闭文章设置">
           <Icon name="close" />
         </button>
       </header>
 
+      <div className="article-panel-tabs" role="tablist" aria-label="文章辅助面板">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeSection === "settings"}
+          className={activeSection === "settings" ? "is-active" : ""}
+          onClick={() => onSectionChange("settings")}
+        >
+          <Icon name="metadata" size={15} />设置
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeSection === "outline"}
+          className={activeSection === "outline" ? "is-active" : ""}
+          onClick={() => onSectionChange("outline")}
+        >
+          <Icon name="outline" size={15} />目录 <span>{headings.length}</span>
+        </button>
+      </div>
+
+      {activeSection === "outline" ? (
+        <nav ref={outlineRef} className="article-outline" aria-label="当前文章目录">
+          {headings.length > 0 ? (
+            <ol>
+              {headings.map((heading) => (
+                <li key={`${heading.line}:${heading.text}`} style={{ "--outline-depth": Math.min(heading.level - minimumHeadingLevel, 4) } as CSSProperties}>
+                  <button
+                    type="button"
+                    className={heading.line === activeHeadingLine ? "is-active" : undefined}
+                    data-heading-line={heading.line}
+                    aria-current={heading.line === activeHeadingLine ? "location" : undefined}
+                    onClick={() => onHeadingSelect(heading.line)}
+                  >
+                    <span>{heading.text}</span>
+                    <small>{heading.line}</small>
+                  </button>
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <div className="article-outline__empty">
+              <Icon name="outline" size={28} />
+              <strong>还没有目录</strong>
+              <p>使用 <code>## 二级标题</code> 组织正文，目录会在这里实时生成。</p>
+            </div>
+          )}
+          <footer>{headings.length > 0 ? `共 ${headings.length} 个章节 · 点击可定位到源码` : "目录不会写入文章内容"}</footer>
+        </nav>
+      ) : (
       <div className="metadata-scroll">
         <section className="metadata-section" aria-labelledby={`${id}-content-heading`}>
           <h3 id={`${id}-content-heading`}>Frontmatter</h3>
@@ -234,6 +308,7 @@ export function MetadataPanel({
           </section>
         ) : null}
       </div>
+      )}
     </aside>
   );
 }

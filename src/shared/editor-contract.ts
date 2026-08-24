@@ -262,6 +262,7 @@ export interface MarkdownEditorDriver {
   insert(source: string, select?: boolean): void;
   setView(view: EditorView): void;
   focus(): void;
+  focusLine(line: number): void;
   validate(): EditorDiagnostic[];
   destroy(): void;
 }

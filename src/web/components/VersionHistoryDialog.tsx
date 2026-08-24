@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ArticleDocument, ArticleRevision } from "../../shared/editor-contract";
-import { diffLines, splitDiffRows } from "../lib/line-diff";
+import { compactDiffLines, diffLines, splitDiffRows } from "../lib/line-diff";
 import { Icon } from "./Icons";
+import { SelectMenu } from "./SelectMenu";
 
 interface VersionHistoryDialogProps {
   open: boolean;
@@ -49,20 +50,31 @@ export function VersionHistoryDialog({
   open, article, revisions, loading = false, busy = false, error, onClose, onRestore,
 }: VersionHistoryDialogProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [compareTargetId, setCompareTargetId] = useState("current");
   const [diffView, setDiffView] = useState<"split" | "unified">("split");
+  const online = revisions.find((revision) => revision.kind === "repository") ?? null;
   useEffect(() => {
     if (open && revisions.length && !revisions.some((revision) => revision.id === selectedId)) {
-      setSelectedId(revisions[0].id);
+      setSelectedId(revisions.find((revision) => revision.kind === "repository")?.id ?? revisions[0].id);
+      setCompareTargetId("current");
     }
   }, [open, revisions, selectedId]);
+  useEffect(() => {
+    if (selectedId === compareTargetId) setCompareTargetId("current");
+  }, [compareTargetId, selectedId]);
   const selected = revisions.find((revision) => revision.id === selectedId) ?? revisions[0] ?? null;
+  const compareRevision = revisions.find((revision) => revision.id === compareTargetId) ?? null;
+  const compareSource = compareRevision?.source ?? article?.source ?? "";
+  const comparePath = compareRevision?.path ?? article?.path ?? "";
   const lines = useMemo(
-    () => selected && article ? diffLines(selected.source, article.source) : [],
-    [selected, article],
+    () => selected ? diffLines(selected.source, compareSource) : [],
+    [selected, compareSource],
   );
+  const visibleLines = useMemo(() => compactDiffLines(lines), [lines]);
   const additions = lines.filter((line) => line.type === "added").length;
   const removals = lines.filter((line) => line.type === "removed").length;
-  const splitRows = useMemo(() => splitDiffRows(lines), [lines]);
+  const splitRows = useMemo(() => splitDiffRows(visibleLines), [visibleLines]);
+  const hasChanges = additions > 0 || removals > 0 || Boolean(selected && selected.path !== comparePath);
   const sameAsCurrent = Boolean(
     selected && article && selected.contentHash === article.baseGitHash && selected.path === article.path && article.syncStatus === "synced",
   ) || Boolean(selected && article && selected.source === article.source && selected.path === article.path);
@@ -82,7 +94,7 @@ export function VersionHistoryDialog({
             <div className="history-current"><i /><span><strong>当前 CMS 内容</strong><small>{article?.syncStatus === "synced" ? "已与仓库同步" : "包含尚未推送的改动"}</small></span></div>
             {loading ? <div className="history-loading"><span className="spinner" />正在读取版本…</div> : revisions.map((revision) => (
               <button key={revision.id} type="button" className={revision.id === selected?.id ? "is-active" : ""} onClick={() => setSelectedId(revision.id)}>
-                <i /><span><strong>{revisionLabel(revision).title}</strong><small>{dateTime(revision.createdAt)}</small><em>{revisionLabel(revision).detail}</em></span>
+                <i /><span><strong>{revision.id === online?.id ? "线上最新" : revisionLabel(revision).title}</strong><small>{dateTime(revision.createdAt)}</small><em>{revisionLabel(revision).detail}</em></span>
               </button>
             ))}
             {!loading && revisions.length === 0 ? <p className="history-empty">还没有历史快照。继续编辑或拉取仓库后会自动记录。</p> : null}
@@ -92,28 +104,42 @@ export function VersionHistoryDialog({
               <div className="history-diff__summary">
                 <div><strong>{revisionLabel(selected).title}</strong><span>{selected.gitCommitSha ? `${selected.gitCommitSha.slice(0, 10)} · ` : ""}{selected.path}</span></div>
                 <div className="history-diff__tools">
-                  <div className="diff-stats"><b>+{additions}</b><b>−{removals}</b><span>与当前 CMS 比较</span></div>
+                  <SelectMenu<string>
+                    className="history-compare-menu"
+                    label="比较对象"
+                    value={compareTargetId}
+                    options={[
+                      { value: "current", label: "当前 CMS 内容", detail: article?.syncStatus === "synced" ? "已同步" : "含未推送改动" },
+                      ...revisions.filter((revision) => revision.id !== selected.id).map((revision) => ({
+                        value: revision.id,
+                        label: revision.id === online?.id ? "线上最新" : revisionLabel(revision).title,
+                        detail: `${dateTime(revision.createdAt)} · ${revision.gitCommitSha?.slice(0, 8) ?? "CMS"}`,
+                      })),
+                    ]}
+                    onChange={setCompareTargetId}
+                  />
+                  <div className="diff-stats"><b>+{additions}</b><b>−{removals}</b></div>
                   <div className="diff-view-switcher" role="group" aria-label="差异视图">
                     <button type="button" className={diffView === "split" ? "is-active" : ""} aria-pressed={diffView === "split"} onClick={() => setDiffView("split")}><span className="split-icon" />分屏</button>
                     <button type="button" className={diffView === "unified" ? "is-active" : ""} aria-pressed={diffView === "unified"} onClick={() => setDiffView("unified")}><Icon name="article" size={13} />合并</button>
                   </div>
                 </div>
               </div>
-              {selected.path !== article?.path ? <div className="path-diff"><span>路径</span><del>{selected.path}</del><ins>{article?.path}</ins></div> : null}
-              {diffView === "split" ? (
+              {selected.path !== comparePath ? <div className="path-diff"><span>路径</span><del>{selected.path}</del><ins>{comparePath}</ins></div> : null}
+              {!hasChanges ? <div className="history-diff__unchanged"><Icon name="check" /><strong>两个版本内容一致</strong><span>没有可显示的 Markdown 或路径差异。</span></div> : diffView === "split" ? (
                 <div className="diff-split" role="region" aria-label="Markdown 分屏差异" tabIndex={0}>
-                  <div className="diff-split__head"><span>历史版本</span><span>当前 CMS</span></div>
+                  <div className="diff-split__head"><span>所选版本</span><span>{compareRevision ? revisionLabel(compareRevision).title : "当前 CMS"}</span></div>
                   <div className="diff-split__body">
                     {splitRows.map((row, index) => <div className="diff-split__row" key={index}>
-                      <div className={`diff-side diff-side--${row.left?.type ?? "empty"}`}><span>{row.left?.oldNumber ?? ""}</span><b>{row.left?.type === "removed" ? "−" : " "}</b><code>{row.left?.value || " "}</code></div>
-                      <div className={`diff-side diff-side--${row.right?.type ?? "empty"}`}><span>{row.right?.newNumber ?? ""}</span><b>{row.right?.type === "added" ? "+" : " "}</b><code>{row.right?.value || " "}</code></div>
+                      <div className={`diff-side diff-side--${row.left?.omitted ? "omitted" : row.left?.type ?? "empty"}`}><span>{row.left?.omitted ? "" : row.left?.oldNumber ?? ""}</span><b>{row.left?.omitted ? "⋯" : row.left?.type === "removed" ? "−" : " "}</b><code>{row.left?.value || " "}</code></div>
+                      <div className={`diff-side diff-side--${row.right?.omitted ? "omitted" : row.right?.type ?? "empty"}`}><span>{row.right?.omitted ? "" : row.right?.newNumber ?? ""}</span><b>{row.right?.omitted ? "⋯" : row.right?.type === "added" ? "+" : " "}</b><code>{row.right?.value || " "}</code></div>
                     </div>)}
                   </div>
                 </div>
               ) : (
                 <div className="diff-code" role="region" aria-label="Markdown 合并差异" tabIndex={0}>
-                  {lines.map((line, index) => <div key={`${index}:${line.type}`} className={`diff-line diff-line--${line.type}`}>
-                    <span>{line.oldNumber ?? ""}</span><span>{line.newNumber ?? ""}</span><b>{line.type === "added" ? "+" : line.type === "removed" ? "−" : " "}</b><code>{line.value || " "}</code>
+                  {visibleLines.map((line, index) => <div key={`${index}:${line.type}`} className={`diff-line diff-line--${line.omitted ? "omitted" : line.type}`}>
+                    <span>{line.omitted ? "" : line.oldNumber ?? ""}</span><span>{line.omitted ? "" : line.newNumber ?? ""}</span><b>{line.omitted ? "⋯" : line.type === "added" ? "+" : line.type === "removed" ? "−" : " "}</b><code>{line.value || " "}</code>
                   </div>)}
                 </div>
               )}

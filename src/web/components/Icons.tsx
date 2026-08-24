@@ -18,6 +18,7 @@ export type IconName =
   | "menu"
   | "metadata"
   | "move"
+  | "outline"
   | "plus"
   | "preview"
   | "publish"
@@ -83,6 +84,8 @@ export function Icon({ name, size = 18, ...props }: IconProps) {
       return <svg {...common}><path d="M5 4h14v16H5zM8 8h8M8 12h8M8 16h5" /></svg>;
     case "move":
       return <svg {...common}><path d="M4 7h10M10 3l4 4-4 4M20 17H10M14 13l-4 4 4 4" /></svg>;
+    case "outline":
+      return <svg {...common}><path d="M8 6h12M8 12h9M8 18h6" /><circle cx="4" cy="6" r="1" /><circle cx="4" cy="12" r="1" /><circle cx="4" cy="18" r="1" /></svg>;
     case "plus":
       return <svg {...common}><path d="M12 5v14M5 12h14" /></svg>;
     case "preview":

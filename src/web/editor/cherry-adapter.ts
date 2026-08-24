@@ -15,6 +15,22 @@ export interface CherryInstanceLike {
 
 interface CodeMirrorLike {
   focus?: () => void;
+  scrollDOM?: HTMLElement;
+  posAtCoords?: (coords: { x: number; y: number }) => number | null;
+  state?: {
+    selection?: {
+      main?: { head?: number };
+    };
+    doc?: {
+      lines?: number;
+      line?: (number: number) => { from: number };
+      lineAt?: (position: number) => { number: number };
+    };
+  };
+  dispatch?: (spec: {
+    selection: { anchor: number };
+    scrollIntoView: boolean;
+  }) => void;
 }
 
 /** Isolates the rest of the CMS from Cherry's concrete API. */
@@ -51,6 +67,51 @@ export class CherryMarkdownAdapter implements MarkdownEditorDriver {
     if (this.#destroyed) return;
     const codeMirror = this.#cherry.getCodeMirror() as CodeMirrorLike | null;
     codeMirror?.focus?.();
+  }
+
+  focusLine(line: number): void {
+    if (this.#destroyed) return;
+    const codeMirror = this.#cherry.getCodeMirror() as CodeMirrorLike | null;
+    const document = codeMirror?.state?.doc;
+    if (!document?.line || !document.lines || !codeMirror?.dispatch) {
+      codeMirror?.focus?.();
+      return;
+    }
+    const safeLine = Math.max(1, Math.min(Math.floor(line), document.lines));
+    codeMirror.dispatch({
+      selection: { anchor: document.line(safeLine).from },
+      scrollIntoView: true,
+    });
+    codeMirror.focus?.();
+  }
+
+  getActiveLine(): number | null {
+    if (this.#destroyed) return null;
+    const codeMirror = this.#cherry.getCodeMirror() as CodeMirrorLike | null;
+    const position = codeMirror?.state?.selection?.main?.head;
+    const document = codeMirror?.state?.doc;
+    if (typeof position !== "number" || !document?.lineAt) return null;
+    return document.lineAt(position).number;
+  }
+
+  getViewportLine(): number | null {
+    if (this.#destroyed) return null;
+    const codeMirror = this.#cherry.getCodeMirror() as CodeMirrorLike | null;
+    const scrollDOM = codeMirror?.scrollDOM;
+    const document = codeMirror?.state?.doc;
+    if (!scrollDOM || !codeMirror?.posAtCoords || !document?.lineAt) return null;
+    if (
+      scrollDOM.scrollTop > 0 &&
+      scrollDOM.scrollTop + scrollDOM.clientHeight >= scrollDOM.scrollHeight - 2
+    ) {
+      return document.lines ?? null;
+    }
+    const bounds = scrollDOM.getBoundingClientRect();
+    const position = codeMirror.posAtCoords({
+      x: bounds.left + 12,
+      y: bounds.top + 12,
+    });
+    return position === null ? null : document.lineAt(position).number;
   }
 
   validate(): EditorDiagnostic[] {

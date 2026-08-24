@@ -5955,3 +5955,228 @@ select {
     flex-direction: column;
   }
 }
+
+/* Article outline and focused comparison */
+
+.article-panel-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 7px 10px;
+  border-bottom: 1px solid #e2e4e9;
+  background: #f7f7f8;
+}
+
+.article-panel-tabs button {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #69707a;
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.article-panel-tabs button:hover {
+  background: #eef0f4;
+  color: #202124;
+}
+
+.article-panel-tabs button.is-active {
+  background: #fff;
+  color: #1d4ed8;
+  box-shadow: 0 1px 3px rgb(15 23 42 / 10%);
+}
+
+.article-panel-tabs button span {
+  min-width: 18px;
+  padding: 1px 5px;
+  border-radius: 9px;
+  background: #e8eefc;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  text-align: center;
+}
+
+.article-outline {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  background: #fafafa;
+}
+
+.article-outline ol {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 9px 24px;
+  margin: 0;
+  list-style: none;
+  scrollbar-width: thin;
+}
+
+.article-outline li {
+  padding-left: calc(var(--outline-depth) * 13px);
+}
+
+.article-outline li button {
+  display: grid;
+  width: 100%;
+  min-height: 34px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 0;
+  border-left: 2px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: #4b5563;
+  text-align: left;
+}
+
+.article-outline li button:hover,
+.article-outline li button:focus-visible {
+  border-left-color: #2563eb;
+  outline: 0;
+  background: #e8f0fe;
+  color: #174ea6;
+}
+
+.article-outline li button.is-active {
+  border-left-color: #2563eb;
+  background: #dfeafe;
+  color: #174ea6;
+  box-shadow: inset 0 0 0 1px rgb(37 99 235 / 8%);
+}
+
+.article-outline li button.is-active small {
+  color: #2563eb;
+  font-weight: 700;
+}
+
+.article-outline li button span {
+  overflow: hidden;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.article-outline li button small {
+  color: #9aa0a6;
+  font-family: var(--font-mono);
+  font-size: 8px;
+}
+
+.article-outline > footer {
+  flex: 0 0 auto;
+  padding: 10px 14px;
+  border-top: 1px solid #e2e4e9;
+  color: #8a9099;
+  font-size: 8px;
+  text-align: center;
+}
+
+.article-outline__empty {
+  display: grid;
+  flex: 1;
+  place-content: center;
+  justify-items: center;
+  gap: 7px;
+  padding: 28px;
+  color: #8a9099;
+  text-align: center;
+}
+
+.article-outline__empty strong {
+  color: #3c4043;
+  font-size: 12px;
+}
+
+.article-outline__empty p {
+  max-width: 210px;
+  margin: 0;
+  font-size: 9px;
+  line-height: 1.6;
+}
+
+.article-outline__empty code {
+  color: #1d4ed8;
+  font-family: var(--font-mono);
+}
+
+.history-reference__line--omitted,
+.diff-line--omitted,
+.diff-side--omitted {
+  border-color: transparent;
+  background: #f6f7f9;
+  color: #8a9099;
+}
+
+.history-reference__line--omitted > code,
+.diff-line--omitted > code,
+.diff-side--omitted > code {
+  color: #8a9099;
+  font-style: italic;
+}
+
+.history-reference__empty.is-synced {
+  flex-direction: column;
+  color: #28744f;
+}
+
+.history-compare-menu {
+  width: 168px;
+}
+
+.history-compare-menu .select-menu__trigger {
+  min-height: 31px;
+  background: #fff;
+  font-size: 9px;
+}
+
+.history-compare-menu .select-menu__popover {
+  top: calc(100% + 5px);
+  right: 0;
+  bottom: auto;
+  left: auto;
+  width: 250px;
+  max-height: 320px;
+}
+
+.history-diff__unchanged {
+  display: grid;
+  flex: 1;
+  place-content: center;
+  justify-items: center;
+  gap: 6px;
+  color: #28744f;
+}
+
+.history-diff__unchanged strong {
+  color: #303134;
+  font-size: 13px;
+}
+
+.history-diff__unchanged span {
+  color: #8a9099;
+  font-size: 10px;
+}
+
+@media (max-width: 799px) {
+  .history-compare-menu {
+    width: 145px;
+  }
+
+  .history-compare-menu .select-menu__popover {
+    width: min(250px, calc(100vw - 28px));
+  }
+}

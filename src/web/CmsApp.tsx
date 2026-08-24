@@ -21,7 +21,7 @@ import { DeleteArticleDialog } from "./components/DeleteArticleDialog";
 import { HistoryReferencePanel } from "./components/HistoryReferencePanel";
 import { Icon } from "./components/Icons";
 import { LoginScreen } from "./components/LoginScreen";
-import { MetadataPanel } from "./components/MetadataPanel";
+import { MetadataPanel, type ArticlePanelSection } from "./components/MetadataPanel";
 import { MdxPreview } from "./components/MdxPreview";
 import { MoveArticleDialog } from "./components/MoveArticleDialog";
 import { PublishArticleDialog } from "./components/PublishArticleDialog";
@@ -40,6 +40,10 @@ import {
   writeMetadataToSource,
 } from "./lib/frontmatter";
 import { validateSource } from "./lib/mdx";
+import {
+  activeArticleHeadingLine,
+  extractArticleHeadings,
+} from "./lib/article-outline";
 
 const ALLOW_UNAUTHENTICATED =
   import.meta.env.VITE_CMS_ALLOW_UNAUTHENTICATED === "true";
@@ -240,6 +244,9 @@ export function CmsApp({ apiClient }: CmsAppProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [metadataOpen, setMetadataOpen] = useState(false);
+  const [articlePanelSection, setArticlePanelSection] =
+    useState<ArticlePanelSection>("outline");
+  const [activeEditorLine, setActiveEditorLine] = useState(1);
   const [newDialogOpen, setNewDialogOpen] = useState(false);
   const [newArticleDirectory, setNewArticleDirectory] = useState("src/content");
   const [moveDialogOpen, setMoveDialogOpen] = useState(false);
@@ -342,6 +349,8 @@ export function CmsApp({ apiClient }: CmsAppProps) {
         setView("edit&preview");
         setMobilePane("write");
         setHistoryReferenceOpen(false);
+        setArticlePanelSection("outline");
+        setActiveEditorLine(1);
         setSidebarOpen(false);
       } catch (error) {
         if (!isUnauthorized(error) || !handleUnauthorized()) {
@@ -372,6 +381,7 @@ export function CmsApp({ apiClient }: CmsAppProps) {
           setMetadata(parsed.metadata);
           setDiagnostics(validateSource(first.source));
           setView("edit&preview");
+          setActiveEditorLine(1);
           changeRevisionRef.current = 0;
           lastSavedRevisionRef.current = 0;
         }
@@ -1343,6 +1353,14 @@ export function CmsApp({ apiClient }: CmsAppProps) {
       ).sort((left, right) => left.localeCompare(right, "zh-CN")),
     [articles],
   );
+  const articleHeadings = useMemo(
+    () => extractArticleHeadings(source),
+    [source],
+  );
+  const activeHeadingLine = useMemo(
+    () => activeArticleHeadingLine(articleHeadings, activeEditorLine),
+    [activeEditorLine, articleHeadings],
+  );
 
   const login = async (password: string) => {
     setAuthBusy(true);
@@ -1570,18 +1588,33 @@ export function CmsApp({ apiClient }: CmsAppProps) {
                     aria-pressed={historyReferenceOpen}
                   >
                     <Icon name="history" />
-                    历史
+                    改动
                   </button>
                 </div>
                 <button
                   className="button button--quiet metadata-trigger metadata-trigger--subheader"
                   type="button"
-                  onClick={() => setMetadataOpen(true)}
+                  onClick={() => {
+                    setArticlePanelSection("settings");
+                    setMetadataOpen(true);
+                  }}
                   disabled={activeArticle.syncStatus === "deleting"}
                   aria-label="打开文章设置"
                 >
                   <Icon name="metadata" />
                   <span>文章设置</span>
+                </button>
+                <button
+                  className="button button--quiet metadata-trigger metadata-trigger--subheader"
+                  type="button"
+                  onClick={() => {
+                    setArticlePanelSection("outline");
+                    setMetadataOpen(true);
+                  }}
+                  aria-label={`打开文章目录，共 ${articleHeadings.length} 个章节`}
+                >
+                  <Icon name="outline" />
+                  <span>目录 {articleHeadings.length}</span>
                 </button>
               </div>
             </div>
@@ -1639,7 +1672,7 @@ export function CmsApp({ apiClient }: CmsAppProps) {
                 }
               >
                 <Icon name="history" />
-                历史
+                改动
               </button>
             </div>
 
@@ -1676,6 +1709,7 @@ export function CmsApp({ apiClient }: CmsAppProps) {
                   activeArticle.format === "mdx" ? "editOnly" : effectiveView
                 }
                 onChange={applySource}
+                onActiveLineChange={setActiveEditorLine}
                 onUpload={
                   client.uploadMedia
                     ? async (file) => {
@@ -1709,7 +1743,10 @@ export function CmsApp({ apiClient }: CmsAppProps) {
               {activeArticle.format === "mdx" &&
               !historyReferenceOpen &&
               effectiveView !== "editOnly" ? (
-                <MdxPreview source={source} />
+                <MdxPreview
+                  source={source}
+                  onActiveLineChange={setActiveEditorLine}
+                />
               ) : null}
               {historyReferenceOpen ? (
                 <HistoryReferencePanel
@@ -1717,8 +1754,10 @@ export function CmsApp({ apiClient }: CmsAppProps) {
                   currentPath={path}
                   currentSource={source}
                   revisions={revisions}
+                  published={Boolean(activeArticle.publishedAt)}
                   loading={historyLoading}
                   error={historyError}
+                  onOpenHistory={() => setHistoryOpen(true)}
                 />
               ) : null}
             </div>
@@ -1787,9 +1826,21 @@ export function CmsApp({ apiClient }: CmsAppProps) {
       {activeArticle ? (
         <MetadataPanel
           metadata={metadata}
+          headings={articleHeadings}
+          activeHeadingLine={activeHeadingLine}
+          activeSection={articlePanelSection}
           tagSuggestions={tagSuggestions}
           diagnostics={diagnostics}
           disabled={saveState === "saving" || publishing}
+          onSectionChange={setArticlePanelSection}
+          onHeadingSelect={(line) => {
+            setActiveEditorLine(line);
+            setHistoryReferenceOpen(false);
+            setView("editOnly");
+            setMobilePane("write");
+            setMetadataOpen(false);
+            requestAnimationFrame(() => editorRef.current?.focusLine(line));
+          }}
           onMetadataChange={updateMetadata}
           onClose={() => setMetadataOpen(false)}
         />
