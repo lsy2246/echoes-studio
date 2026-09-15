@@ -1217,8 +1217,14 @@ export function CmsApp({ apiClient }: CmsAppProps) {
       }
       setDeleteCandidate(null);
     } catch (error) {
-      if (!isUnauthorized(error) || !handleUnauthorized())
+      if (!isUnauthorized(error) || !handleUnauthorized()) {
         setDeleteError(errorMessage(error));
+        if (error instanceof CmsApiError && error.status === 409) {
+          setDeleteCandidate(null);
+          await Promise.all([loadConflicts(), loadArticles(false)]);
+          setConflictCenterOpen(true);
+        }
+      }
     } finally {
       setDeleteBusy(false);
     }
@@ -1228,6 +1234,8 @@ export function CmsApp({ apiClient }: CmsAppProps) {
     deleteCandidate,
     flushDraft,
     handleUnauthorized,
+    loadArticles,
+    loadConflicts,
     saveState,
   ]);
 
@@ -1498,6 +1506,7 @@ export function CmsApp({ apiClient }: CmsAppProps) {
             setPublishDialogOpen(true);
           }
         }}
+        onOpenConflicts={() => setConflictCenterOpen(true)}
         conflictCount={conflicts.length}
       />
 

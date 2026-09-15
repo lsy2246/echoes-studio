@@ -35,6 +35,7 @@ interface ArticleSidebarProps {
   onPullRepository: () => void;
   onPushCurrent: () => void;
   onPushSelected: (articleIds: string[]) => void;
+  onOpenConflicts: () => void;
   conflictCount: number;
 }
 
@@ -253,6 +254,7 @@ export function ArticleSidebar({
   onPullRepository,
   onPushCurrent,
   onPushSelected,
+  onOpenConflicts,
   conflictCount,
 }: ArticleSidebarProps) {
   const [search, setSearch] = useState("");
@@ -490,8 +492,13 @@ export function ArticleSidebar({
             key={value}
             type="button"
             className={`${filter === value ? "is-active" : ""}${value === "pending" && count > 0 ? " has-pending" : ""}`}
-            onClick={() => setFilter(value)}
+            onClick={() => {
+              setFilter(value);
+              if (value === "conflict" && count > 0) onOpenConflicts();
+            }}
             aria-pressed={filter === value}
+            aria-haspopup={value === "conflict" && count > 0 ? "dialog" : undefined}
+            title={value === "conflict" && count > 0 ? "筛选冲突文章并打开冲突中心" : undefined}
           >
             {label}<span>{count}</span>
           </button>
