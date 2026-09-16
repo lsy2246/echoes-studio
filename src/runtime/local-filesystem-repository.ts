@@ -182,12 +182,19 @@ export async function createLocalFilesystemRepository(
       const remoteDiverged = input.basePath != null && remoteHash !== input.baseContentHash;
       const targetCollision = remotePath !== input.path && targetHash !== null && targetHash !== input.contentHash;
       const newPathCollision = input.basePath == null && remotePath === input.path && targetHash !== null && targetHash !== input.contentHash;
-      if (targetCollision || newPathCollision || (remoteDiverged && remoteHash !== input.contentHash)) {
+      const pathCollision = targetCollision || newPathCollision;
+      const contentIssue = remoteDiverged && remoteHash !== input.contentHash
+        ? remoteHash === null ? "delete_edit" as const : "edit_edit" as const
+        : null;
+      if (pathCollision || contentIssue) {
         throw new RepositoryContentConflictError({
-          kind: targetCollision || newPathCollision ? "path_collision" : remoteHash === null ? "delete_edit" : "edit_edit",
-          remotePath: targetCollision || newPathCollision ? input.path : remoteHash === null ? null : remotePath,
-          remoteSource: targetCollision || newPathCollision ? targetEntry?.source ?? null : remoteEntry?.source ?? null,
-          remoteContentHash: targetCollision || newPathCollision ? targetHash : remoteHash,
+          issues: [...(pathCollision ? ["path_collision" as const] : []), ...(contentIssue ? [contentIssue] : [])],
+          remotePath: remoteHash === null ? null : remotePath,
+          remoteSource: remoteEntry?.source ?? null,
+          remoteContentHash: remoteHash,
+          occupiedPath: pathCollision ? input.path : null,
+          occupiedSource: pathCollision ? targetEntry?.source ?? null : null,
+          occupiedContentHash: pathCollision ? targetHash : null,
           remoteCommitSha: before.headCommit,
         });
       }
@@ -228,10 +235,13 @@ export async function createLocalFilesystemRepository(
     const remoteHash = await sha256Text(remote.source);
     if (input.baseContentHash != null && remoteHash !== input.baseContentHash) {
       throw new RepositoryContentConflictError({
-        kind: "delete_edit",
+        issues: ["delete_edit"],
         remotePath: input.path,
         remoteSource: remote.source,
         remoteContentHash: remoteHash,
+        occupiedPath: null,
+        occupiedSource: null,
+        occupiedContentHash: null,
         remoteCommitSha: before.headCommit,
       });
     }
@@ -269,10 +279,13 @@ export async function createLocalFilesystemRepository(
           conflicts.push({
             publicationId: change.publicationId,
             snapshot: {
-              kind: "delete_edit" as const,
+              issues: ["delete_edit" as const],
               remotePath: change.path,
               remoteSource: remote?.source ?? null,
               remoteContentHash: remoteHash,
+              occupiedPath: null,
+              occupiedSource: null,
+              occupiedContentHash: null,
               remoteCommitSha: before.headCommit,
             },
           });
@@ -295,15 +308,21 @@ export async function createLocalFilesystemRepository(
         && targetHash !== change.contentHash && !vacatedPaths.has(change.path);
       const newPathCollision = change.basePath == null && remotePath === change.path
         && targetHash !== null && targetHash !== change.contentHash;
-      if (targetCollision || newPathCollision || (remoteDiverged && remoteHash !== change.contentHash)) {
+      const pathCollision = targetCollision || newPathCollision;
+      const contentIssue = remoteDiverged && remoteHash !== change.contentHash
+        ? remoteHash === null ? "delete_edit" as const : "edit_edit" as const
+        : null;
+      if (pathCollision || contentIssue) {
         conflicts.push({
           publicationId: change.publicationId,
           snapshot: {
-            kind: targetCollision || newPathCollision ? "path_collision" as const
-              : remoteHash === null ? "delete_edit" as const : "edit_edit" as const,
-            remotePath: targetCollision || newPathCollision ? change.path : remoteHash === null ? null : remotePath,
-            remoteSource: targetCollision || newPathCollision ? target?.source ?? null : remote?.source ?? null,
-            remoteContentHash: targetCollision || newPathCollision ? targetHash : remoteHash,
+            issues: [...(pathCollision ? ["path_collision" as const] : []), ...(contentIssue ? [contentIssue] : [])],
+            remotePath: remoteHash === null ? null : remotePath,
+            remoteSource: remote?.source ?? null,
+            remoteContentHash: remoteHash,
+            occupiedPath: pathCollision ? change.path : null,
+            occupiedSource: pathCollision ? target?.source ?? null : null,
+            occupiedContentHash: pathCollision ? targetHash : null,
             remoteCommitSha: before.headCommit,
           },
         });

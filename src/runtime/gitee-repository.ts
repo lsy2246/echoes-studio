@@ -304,8 +304,9 @@ export function createGiteeRepository(options: GiteeRepositoryOptions): GitRepos
         const remote = await at(change.path);
         if (change.baseContentHash != null && remote.hash !== null && remote.hash !== change.baseContentHash) {
           conflicts.push({ publicationId: change.publicationId, snapshot: {
-            kind: "delete_edit", remotePath: change.path, remoteSource: remote.source,
-            remoteContentHash: remote.hash, remoteCommitSha: baseHead,
+            issues: ["delete_edit"], remotePath: change.path, remoteSource: remote.source,
+            remoteContentHash: remote.hash, occupiedPath: null, occupiedSource: null,
+            occupiedContentHash: null, remoteCommitSha: baseHead,
           } });
         }
         continue;
@@ -319,12 +320,19 @@ export function createGiteeRepository(options: GiteeRepositoryOptions): GitRepos
         target.hash !== change.contentHash && !collisionWillMove;
       const newPathCollision = change.basePath == null && remotePath === change.path &&
         target.hash !== null && target.hash !== change.contentHash;
-      if (targetCollision || newPathCollision || (remoteDiverged && remote.hash !== change.contentHash)) {
+      const pathCollision = targetCollision || newPathCollision;
+      const contentIssue = remoteDiverged && remote.hash !== change.contentHash
+        ? remote.hash === null ? "delete_edit" as const : "edit_edit" as const
+        : null;
+      if (pathCollision || contentIssue) {
         conflicts.push({ publicationId: change.publicationId, snapshot: {
-          kind: targetCollision || newPathCollision ? "path_collision" : remote.hash === null ? "delete_edit" : "edit_edit",
-          remotePath: targetCollision || newPathCollision ? change.path : remote.hash === null ? null : remotePath,
-          remoteSource: targetCollision || newPathCollision ? target.source : remote.source,
-          remoteContentHash: targetCollision || newPathCollision ? target.hash : remote.hash,
+          issues: [...(pathCollision ? ["path_collision" as const] : []), ...(contentIssue ? [contentIssue] : [])],
+          remotePath: remote.hash === null ? null : remotePath,
+          remoteSource: remote.source,
+          remoteContentHash: remote.hash,
+          occupiedPath: pathCollision ? change.path : null,
+          occupiedSource: pathCollision ? target.source : null,
+          occupiedContentHash: pathCollision ? target.hash : null,
           remoteCommitSha: baseHead,
         } });
       }
@@ -482,8 +490,9 @@ export function createGiteeRepository(options: GiteeRepositoryOptions): GitRepos
     if (remote.source === null) return { status: "deleted", commitSha: baseHead, branch };
     if (input.baseContentHash != null && remote.hash !== input.baseContentHash) {
       throw new RepositoryContentConflictError({
-        kind: "delete_edit", remotePath: input.path, remoteSource: remote.source,
-        remoteContentHash: remote.hash, remoteCommitSha: baseHead,
+        issues: ["delete_edit"], remotePath: input.path, remoteSource: remote.source,
+        remoteContentHash: remote.hash, occupiedPath: null, occupiedSource: null,
+        occupiedContentHash: null, remoteCommitSha: baseHead,
       });
     }
     const commitSha = await commitChanges(

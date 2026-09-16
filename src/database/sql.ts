@@ -123,16 +123,42 @@ function mapArticleRevision(row: SqlRow): ArticleRevision {
 }
 
 function mapContentConflict(row: SqlRow): ContentConflict {
+  const storedKind = text(row, "kind") as ContentConflict["issues"][number];
+  const storedContentKind = nullableText(
+    row,
+    "content_kind",
+  ) as ContentConflict["issues"][number] | null;
+  const storedOccupiedPath = nullableText(row, "occupied_path");
+  const legacyPathConflict =
+    storedKind === "path_collision" && storedOccupiedPath === null;
   return {
     id: text(row, "id"),
     articleId: text(row, "article_id"),
-    kind: text(row, "kind") as ContentConflict["kind"],
+    issues:
+      storedKind === "path_collision"
+        ? [storedKind, ...(storedContentKind ? [storedContentKind] : [])]
+        : [storedKind],
     basePath: nullableText(row, "base_path"),
     baseSource: nullableText(row, "base_source"),
     baseHash: nullableText(row, "base_hash"),
-    remotePath: nullableText(row, "remote_path"),
-    remoteSource: nullableText(row, "remote_source"),
-    remoteHash: nullableText(row, "remote_hash"),
+    remotePath: legacyPathConflict
+      ? nullableText(row, "base_path")
+      : nullableText(row, "remote_path"),
+    remoteSource: legacyPathConflict
+      ? nullableText(row, "base_source")
+      : nullableText(row, "remote_source"),
+    remoteHash: legacyPathConflict
+      ? nullableText(row, "base_hash")
+      : nullableText(row, "remote_hash"),
+    occupiedPath: legacyPathConflict
+      ? nullableText(row, "remote_path")
+      : storedOccupiedPath,
+    occupiedSource: legacyPathConflict
+      ? nullableText(row, "remote_source")
+      : nullableText(row, "occupied_source"),
+    occupiedHash: legacyPathConflict
+      ? nullableText(row, "remote_hash")
+      : nullableText(row, "occupied_hash"),
     remoteCommitSha: text(row, "remote_commit_sha"),
     draftPath: text(row, "draft_path"),
     draftSource: text(row, "draft_source"),
@@ -528,19 +554,30 @@ export class SqlDatabase implements DatabasePort {
     const existing = await this.getOpenContentConflictByArticle(
       input.articleId,
     );
+    const hasPathCollision = input.issues.includes("path_collision");
+    const contentKind = input.issues.find(
+      (issue) => issue !== "path_collision",
+    ) ?? null;
+    const storedKind = hasPathCollision
+      ? "path_collision"
+      : (contentKind ?? "edit_edit");
     if (existing) {
       await this.executor.run(
-        `UPDATE cms_content_conflicts SET kind = ?, base_path = ?, base_source = ?, base_hash = ?,
-         remote_path = ?, remote_source = ?, remote_hash = ?, remote_commit_sha = ?, draft_path = ?,
+        `UPDATE cms_content_conflicts SET kind = ?, content_kind = ?, base_path = ?, base_source = ?, base_hash = ?,
+         remote_path = ?, remote_source = ?, remote_hash = ?, occupied_path = ?, occupied_source = ?, occupied_hash = ?, remote_commit_sha = ?, draft_path = ?,
          draft_source = ?, draft_hash = ?, draft_version = ?, updated_at = ? WHERE id = ?`,
         [
-          input.kind,
+          storedKind,
+          hasPathCollision ? contentKind : null,
           input.basePath,
           input.baseSource,
           input.baseHash,
           input.remotePath,
           input.remoteSource,
           input.remoteHash,
+          input.occupiedPath,
+          input.occupiedSource,
+          input.occupiedHash,
           input.remoteCommitSha,
           input.draftPath,
           input.draftSource,
@@ -554,20 +591,24 @@ export class SqlDatabase implements DatabasePort {
     }
     await this.executor.run(
       `INSERT INTO cms_content_conflicts
-       (id, article_id, kind, base_path, base_source, base_hash, remote_path, remote_source,
-        remote_hash, remote_commit_sha, draft_path, draft_source, draft_hash, draft_version,
+       (id, article_id, kind, content_kind, base_path, base_source, base_hash, remote_path, remote_source,
+        remote_hash, occupied_path, occupied_source, occupied_hash, remote_commit_sha, draft_path, draft_source, draft_hash, draft_version,
         status, resolution, created_at, updated_at, resolved_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', NULL, ?, ?, NULL)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', NULL, ?, ?, NULL)`,
       [
         input.id,
         input.articleId,
-        input.kind,
+        storedKind,
+        hasPathCollision ? contentKind : null,
         input.basePath,
         input.baseSource,
         input.baseHash,
         input.remotePath,
         input.remoteSource,
         input.remoteHash,
+        input.occupiedPath,
+        input.occupiedSource,
+        input.occupiedHash,
         input.remoteCommitSha,
         input.draftPath,
         input.draftSource,
@@ -739,13 +780,16 @@ export class SqlDatabase implements DatabasePort {
               const recorded = await scoped.recordContentConflict({
                 id: crypto.randomUUID(),
                 articleId: existing.id,
-                kind: "edit_edit",
+                issues: ["edit_edit"],
                 basePath: draft.basePath,
                 baseSource: draft.baseSource,
                 baseHash,
                 remotePath: item.path,
                 remoteSource: item.source,
                 remoteHash: item.contentHash,
+                occupiedPath: null,
+                occupiedSource: null,
+                occupiedHash: null,
                 remoteCommitSha: input.commitSha,
                 draftPath: existing.path,
                 draftSource: draft.source,
@@ -859,13 +903,16 @@ export class SqlDatabase implements DatabasePort {
             const recorded = await scoped.recordContentConflict({
               id: crypto.randomUUID(),
               articleId: existing.id,
-              kind: "delete_edit",
+              issues: ["delete_edit"],
               basePath: draft.basePath,
               baseSource: draft.baseSource,
               baseHash: draft.baseContentHash,
               remotePath: null,
               remoteSource: null,
               remoteHash: null,
+              occupiedPath: null,
+              occupiedSource: null,
+              occupiedHash: null,
               remoteCommitSha: input.commitSha,
               draftPath: existing.path,
               draftSource: draft.source,

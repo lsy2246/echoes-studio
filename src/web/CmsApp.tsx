@@ -618,7 +618,6 @@ export function CmsApp({ apiClient }: CmsAppProps) {
               current ? { ...current, syncStatus: "conflict" } : current,
             );
             await Promise.all([loadConflicts(), loadArticles(false)]);
-            setConflictCenterOpen(true);
           }
         }
         return false;
@@ -725,7 +724,6 @@ export function CmsApp({ apiClient }: CmsAppProps) {
           setWorkspaceError(errorMessage(error));
           if (error instanceof CmsApiError && error.status === 409) {
             await Promise.all([loadConflicts(), loadArticles(false)]);
-            setConflictCenterOpen(true);
           }
         }
       } finally {
@@ -834,7 +832,6 @@ export function CmsApp({ apiClient }: CmsAppProps) {
           setWorkspaceError(errorMessage(error));
           if (error instanceof CmsApiError && error.status === 409) {
             await Promise.all([loadConflicts(), loadArticles(false)]);
-            setConflictCenterOpen(true);
           }
         }
       } finally {
@@ -1014,6 +1011,7 @@ export function CmsApp({ apiClient }: CmsAppProps) {
         resolution: ContentConflictResolution;
         mergedSource?: string;
         mergedPath?: string;
+        action?: "save" | "publish";
       },
     ) => {
       setConflictBusy(true);
@@ -1048,7 +1046,11 @@ export function CmsApp({ apiClient }: CmsAppProps) {
         setNotice(
           input.resolution === "remote"
             ? "已采用仓库版本。"
-            : "冲突结果已安全推送到主分支。",
+            : input.resolution === "cms"
+              ? "已采用云端版本并保存为待发布，仓库尚未修改。"
+              : input.action === "save"
+                ? "已采用合并版本并保存为待发布，仓库尚未修改。"
+                : "冲突结果已安全推送到主分支。",
         );
         if (conflicts.length <= 1) setConflictCenterOpen(false);
       } catch (error) {
@@ -1220,9 +1222,7 @@ export function CmsApp({ apiClient }: CmsAppProps) {
       if (!isUnauthorized(error) || !handleUnauthorized()) {
         setDeleteError(errorMessage(error));
         if (error instanceof CmsApiError && error.status === 409) {
-          setDeleteCandidate(null);
           await Promise.all([loadConflicts(), loadArticles(false)]);
-          setConflictCenterOpen(true);
         }
       }
     } finally {

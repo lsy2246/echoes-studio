@@ -58,8 +58,10 @@ CREATE TABLE IF NOT EXISTS cms_content_conflicts (
   id TEXT PRIMARY KEY,
   article_id TEXT NOT NULL REFERENCES cms_articles(id) ON DELETE CASCADE,
   kind TEXT NOT NULL CHECK (kind IN ('edit_edit', 'delete_edit', 'path_collision')),
+  content_kind TEXT CHECK (content_kind IN ('edit_edit', 'delete_edit')),
   base_path TEXT, base_source TEXT, base_hash TEXT,
   remote_path TEXT, remote_source TEXT, remote_hash TEXT,
+  occupied_path TEXT, occupied_source TEXT, occupied_hash TEXT,
   remote_commit_sha TEXT NOT NULL,
   draft_path TEXT NOT NULL, draft_source TEXT NOT NULL, draft_hash TEXT NOT NULL,
   draft_version INTEGER NOT NULL,
@@ -119,7 +121,7 @@ VALUES (1, NULL, NULL, CURRENT_TIMESTAMP)
 ON CONFLICT(id) DO NOTHING;
 
 INSERT INTO cms_schema_version(version, applied_at)
-VALUES (10, CURRENT_TIMESTAMP) ON CONFLICT(version) DO NOTHING;
+VALUES (11, CURRENT_TIMESTAMP) ON CONFLICT(version) DO NOTHING;
 `;
 
 export const POSTGRES_SCHEMA_V1 = `
@@ -180,8 +182,10 @@ CREATE TABLE IF NOT EXISTS cms_content_conflicts (
   id TEXT PRIMARY KEY,
   article_id TEXT NOT NULL REFERENCES cms_articles(id) ON DELETE CASCADE,
   kind TEXT NOT NULL CHECK (kind IN ('edit_edit', 'delete_edit', 'path_collision')),
+  content_kind TEXT CHECK (content_kind IN ('edit_edit', 'delete_edit')),
   base_path TEXT, base_source TEXT, base_hash TEXT,
   remote_path TEXT, remote_source TEXT, remote_hash TEXT,
+  occupied_path TEXT, occupied_source TEXT, occupied_hash TEXT,
   remote_commit_sha TEXT NOT NULL,
   draft_path TEXT NOT NULL, draft_source TEXT NOT NULL, draft_hash TEXT NOT NULL,
   draft_version INTEGER NOT NULL,
@@ -191,6 +195,11 @@ CREATE TABLE IF NOT EXISTS cms_content_conflicts (
 );
 CREATE INDEX IF NOT EXISTS cms_content_conflicts_open_idx
   ON cms_content_conflicts(status, updated_at DESC);
+ALTER TABLE cms_content_conflicts ADD COLUMN IF NOT EXISTS content_kind TEXT
+  CHECK (content_kind IN ('edit_edit', 'delete_edit'));
+ALTER TABLE cms_content_conflicts ADD COLUMN IF NOT EXISTS occupied_path TEXT;
+ALTER TABLE cms_content_conflicts ADD COLUMN IF NOT EXISTS occupied_source TEXT;
+ALTER TABLE cms_content_conflicts ADD COLUMN IF NOT EXISTS occupied_hash TEXT;
 
 CREATE TABLE IF NOT EXISTS cms_publications (
   id TEXT PRIMARY KEY,
@@ -250,5 +259,5 @@ VALUES (1, NULL, NULL, NULL, NULL, CURRENT_TIMESTAMP::TEXT)
 ON CONFLICT(id) DO NOTHING;
 
 INSERT INTO cms_schema_version(version, applied_at)
-VALUES (10, CURRENT_TIMESTAMP::TEXT) ON CONFLICT(version) DO NOTHING;
+VALUES (11, CURRENT_TIMESTAMP::TEXT) ON CONFLICT(version) DO NOTHING;
 `;

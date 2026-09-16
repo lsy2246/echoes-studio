@@ -80,6 +80,21 @@ export async function createNodeSqliteDatabase(
         "ALTER TABLE cms_drafts ADD COLUMN operation TEXT NOT NULL DEFAULT 'upsert' CHECK (operation IN ('upsert', 'delete'))",
       );
     }
+    const conflictColumns = connection
+      .prepare("PRAGMA table_info(cms_content_conflicts)")
+      .all() as Array<{ name?: unknown }>;
+    if (!conflictColumns.some((column) => column.name === "content_kind")) {
+      connection.exec(
+        "ALTER TABLE cms_content_conflicts ADD COLUMN content_kind TEXT CHECK (content_kind IN ('edit_edit', 'delete_edit'))",
+      );
+    }
+    for (const column of ["occupied_path", "occupied_source", "occupied_hash"]) {
+      if (!conflictColumns.some((entry) => entry.name === column)) {
+        connection.exec(
+          `ALTER TABLE cms_content_conflicts ADD COLUMN ${column} TEXT`,
+        );
+      }
+    }
     const systemColumns = connection
       .prepare("PRAGMA table_info(cms_system_settings)")
       .all() as Array<{ name?: unknown }>;
@@ -101,7 +116,7 @@ export async function createNodeSqliteDatabase(
       );
     }
     connection.exec(
-      "INSERT INTO cms_schema_version(version, applied_at) VALUES (10, CURRENT_TIMESTAMP) ON CONFLICT(version) DO NOTHING",
+      "INSERT INTO cms_schema_version(version, applied_at) VALUES (11, CURRENT_TIMESTAMP) ON CONFLICT(version) DO NOTHING",
     );
   }
   const database = new SqlDatabase(

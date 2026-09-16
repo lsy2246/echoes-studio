@@ -492,13 +492,9 @@ export function ArticleSidebar({
             key={value}
             type="button"
             className={`${filter === value ? "is-active" : ""}${value === "pending" && count > 0 ? " has-pending" : ""}`}
-            onClick={() => {
-              setFilter(value);
-              if (value === "conflict" && count > 0) onOpenConflicts();
-            }}
+            onClick={() => setFilter(value)}
             aria-pressed={filter === value}
-            aria-haspopup={value === "conflict" && count > 0 ? "dialog" : undefined}
-            title={value === "conflict" && count > 0 ? "筛选冲突文章并打开冲突中心" : undefined}
+            title={value === "conflict" ? "只显示有冲突的文章" : undefined}
           >
             {label}<span>{count}</span>
           </button>
@@ -607,6 +603,18 @@ export function ArticleSidebar({
         {repositoryError ? <p className="repository-error" role="alert">{repositoryError}</p> : null}
 
         <div className="repository-sync-actions" aria-label="仓库手动同步">
+          {conflictCount > 0 ? (
+            <button
+              className="repository-sync-button repository-sync-button--conflict"
+              type="button"
+              onClick={onOpenConflicts}
+              aria-haspopup="dialog"
+            >
+              <Icon name="warning" size={14} />
+              解决冲突
+              <strong>{conflictCount}</strong>
+            </button>
+          ) : null}
           <button
             className="repository-sync-button"
             type="button"

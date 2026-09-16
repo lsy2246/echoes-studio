@@ -6,6 +6,7 @@ import { after, before, describe, it } from "node:test";
 
 import { createLocalFilesystemRepository } from "../../src/runtime/local-filesystem-repository";
 import { sha256Text } from "../../src/core/hash";
+import { RepositoryContentConflictError } from "../../src/core/git-repository-port";
 
 describe("LocalFilesystemRepository", () => {
   let root = "";
@@ -110,6 +111,48 @@ describe("LocalFilesystemRepository", () => {
       contentHash: "draft", mode: "direct", basePath: alpha.path,
       baseContentHash: await sha256Text(baseline.source), expectedHeadCommit: next.headCommit,
     }), /both changed|diverged|Repository content changed/i);
+  });
+
+  it("reports path occupation and a repository edit together", async () => {
+    const repository = await createLocalFilesystemRepository({ rootPath: root });
+    const before = await repository.snapshot();
+    const original = before.articles.find(
+      (article) => article.path === "src/content/nested/component.mdx",
+    )!;
+    const repositoryEdit = "---\ntitle: MDX\n---\n\n<RepositoryEdit />\n";
+    const occupyingArticle = "---\ntitle: Occupying article\n---\n\nOccupied\n";
+    await writeFile(resolve(root, original.path), repositoryEdit);
+    await writeFile(
+      resolve(root, "src/content/occupied.md"),
+      occupyingArticle,
+    );
+    const cmsEdit = "---\ntitle: MDX\n---\n\n<CmsEdit />\n";
+
+    await assert.rejects(
+      repository.publish({
+        publicationId: "combined-conflict",
+        previousPath: original.path,
+        path: "src/content/occupied.md",
+        source: cmsEdit,
+        contentHash: await sha256Text(cmsEdit),
+        mode: "direct",
+        basePath: original.path,
+        baseContentHash: await sha256Text(original.source),
+        expectedHeadCommit: before.headCommit,
+      }),
+      (error) => {
+        assert.ok(error instanceof RepositoryContentConflictError);
+        assert.deepEqual(error.snapshot.issues, [
+          "path_collision",
+          "edit_edit",
+        ]);
+        assert.equal(error.snapshot.remotePath, original.path);
+        assert.equal(error.snapshot.remoteSource, repositoryEdit);
+        assert.equal(error.snapshot.occupiedPath, "src/content/occupied.md");
+        assert.equal(error.snapshot.occupiedSource, occupyingArticle);
+        return true;
+      },
+    );
   });
 
   it("writes multiple selected articles through one batch operation", async () => {

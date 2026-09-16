@@ -168,14 +168,21 @@ export interface RepositorySyncResult {
 
 export type ContentConflictResolution = "remote" | "cms" | "merged";
 
+export type ContentConflictIssue =
+  | "edit_edit"
+  | "delete_edit"
+  | "path_collision";
+
 export interface ContentConflict {
   id: string;
   articleId: string;
-  kind: "edit_edit" | "delete_edit" | "path_collision";
+  issues: ContentConflictIssue[];
   basePath: string | null;
   baseSource: string | null;
   remotePath: string | null;
   remoteSource: string | null;
+  occupiedPath: string | null;
+  occupiedSource: string | null;
   remoteCommitSha: string;
   draftPath: string;
   draftSource: string;
@@ -235,6 +242,7 @@ export interface CmsApiClient {
       resolution: ContentConflictResolution;
       mergedSource?: string;
       mergedPath?: string;
+      action?: "save" | "publish";
     },
   ): Promise<ArticleDocument | null>;
   getAutomationSettings?(): Promise<AutomationSettings>;

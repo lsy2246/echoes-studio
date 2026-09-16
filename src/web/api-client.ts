@@ -414,6 +414,7 @@ export class FetchCmsApiClient implements CmsApiClient {
       resolution: ContentConflictResolution;
       mergedSource?: string;
       mergedPath?: string;
+      action?: "save" | "publish";
     },
   ): Promise<ArticleDocument | null> {
     const payload = await this.#request<DataEnvelope<BackendArticle | null>>(

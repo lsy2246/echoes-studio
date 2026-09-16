@@ -858,10 +858,13 @@ describe("createApp repository orchestration", () => {
     );
     const remote = "---\ntitle: Multi-device\n---\n\nRemote\n";
     repository.publishError = new RepositoryContentConflictError({
-      kind: "edit_edit",
+      issues: ["edit_edit"],
       remotePath: article.path,
       remoteSource: remote,
       remoteContentHash: await sha256Text(remote),
+      occupiedPath: null,
+      occupiedSource: null,
+      occupiedContentHash: null,
       remoteCommitSha: "2222222222222222222222222222222222222222",
     });
     const rejected = await app(
@@ -902,6 +905,184 @@ describe("createApp repository orchestration", () => {
     assert.equal(resolved.status, 200);
     assert.equal((await payload(resolved)).data.source, cms);
     assert.equal((await database.listContentConflicts()).length, 0);
+  });
+
+  it("keeps the CMS version as a rebased draft without publishing", async () => {
+    const database = new MemoryDatabase();
+    const repository = new FakeRepository();
+    const base = "---\ntitle: Save later\n---\n\nBase\n";
+    repository.snapshotValue.articles = [
+      { path: "content/save-later.md", source: base },
+    ];
+    const app = createApp(appOptions(database, repository));
+    await app(
+      request("/api/repository/sync", {
+        method: "POST",
+        headers: ADMIN_HEADERS,
+      }),
+    );
+    const article =
+      (await database.getArticleByPath("content/save-later.md"))!;
+    const cms = "---\ntitle: Save later\n---\n\nCMS\n";
+    const saved = await payload(
+      await app(
+        request("/api/articles/" + article.id + "/draft", {
+          method: "PUT",
+          headers: ADMIN_HEADERS,
+          body: JSON.stringify({ source: cms, version: 0 }),
+        }),
+      ),
+    );
+    const remote = "---\ntitle: Save later\n---\n\nRemote\n";
+    const remoteHash = await sha256Text(remote);
+    const remoteCommit = "2222222222222222222222222222222222222222";
+    repository.publishError = new RepositoryContentConflictError({
+      issues: ["edit_edit"],
+      remotePath: article.path,
+      remoteSource: remote,
+      remoteContentHash: remoteHash,
+      occupiedPath: null,
+      occupiedSource: null,
+      occupiedContentHash: null,
+      remoteCommitSha: remoteCommit,
+    });
+    const rejected = await app(
+      request("/api/articles/" + article.id + "/publish", {
+        method: "POST",
+        headers: ADMIN_HEADERS,
+        body: JSON.stringify({
+          version: saved.article.version,
+          mode: "direct",
+        }),
+      }),
+    );
+    assert.equal(rejected.status, 409);
+    const openConflict =
+      await database.getOpenContentConflictByArticle(article.id);
+    assert.ok(openConflict);
+    const publishCallCount = repository.publishCalls.length;
+    const resolved = await app(
+      request("/api/conflicts/" + openConflict.id + "/resolve", {
+        method: "POST",
+        headers: ADMIN_HEADERS,
+        body: JSON.stringify({
+          resolution: "cms",
+          action: "save",
+          mergedPath: article.path,
+        }),
+      }),
+    );
+
+    assert.equal(resolved.status, 200);
+    const document = (await payload(resolved)).data;
+    assert.equal(document.source, cms);
+    assert.equal(document.syncStatus, "unpublished");
+    assert.equal(repository.publishCalls.length, publishCallCount);
+    assert.equal(
+      (await database.getOpenContentConflictByArticle(article.id)),
+      null,
+    );
+    assert.equal((await database.getDraft(article.id))?.source, cms);
+    assert.equal((await database.getDraft(article.id))?.baseSource, remote);
+    assert.equal(
+      (await database.getDraft(article.id))?.baseContentHash,
+      remoteHash,
+    );
+    assert.equal((await database.getArticle(article.id))?.source, remote);
+    assert.equal(
+      (await database.getArticle(article.id))?.gitCommitSha,
+      remoteCommit,
+    );
+  });
+
+  it("saves combined path and content conflicts without hiding the remote edit", async () => {
+    const database = new MemoryDatabase();
+    const repository = new FakeRepository();
+    const base = "---\ntitle: Move later\n---\n\nBase\n";
+    repository.snapshotValue.articles = [
+      { path: "content/original.md", source: base },
+    ];
+    const app = createApp(appOptions(database, repository));
+    await app(
+      request("/api/repository/sync", {
+        method: "POST",
+        headers: ADMIN_HEADERS,
+      }),
+    );
+    const article =
+      (await database.getArticleByPath("content/original.md"))!;
+    const cms = "---\ntitle: Move later\n---\n\nCMS moved\n";
+    const saved = await payload(
+      await app(
+        request("/api/articles/" + article.id + "/draft", {
+          method: "PUT",
+          headers: ADMIN_HEADERS,
+          body: JSON.stringify({
+            source: cms,
+            path: "content/occupied.md",
+            version: 0,
+          }),
+        }),
+      ),
+    );
+    const occupied = "---\ntitle: Other article\n---\n\nOccupied\n";
+    const remote = "---\ntitle: Move later\n---\n\nRepository updated too\n";
+    const remoteHash = await sha256Text(remote);
+    repository.publishError = new RepositoryContentConflictError({
+      issues: ["path_collision", "edit_edit"],
+      remotePath: "content/original.md",
+      remoteSource: remote,
+      remoteContentHash: remoteHash,
+      occupiedPath: "content/occupied.md",
+      occupiedSource: occupied,
+      occupiedContentHash: await sha256Text(occupied),
+      remoteCommitSha: "2222222222222222222222222222222222222222",
+    });
+    const rejected = await app(
+      request("/api/articles/" + article.id + "/publish", {
+        method: "POST",
+        headers: ADMIN_HEADERS,
+        body: JSON.stringify({
+          version: saved.article.version,
+          mode: "direct",
+        }),
+      }),
+    );
+    assert.equal(rejected.status, 409);
+    const openConflict =
+      await database.getOpenContentConflictByArticle(article.id);
+    assert.ok(openConflict);
+    const publishCallCount = repository.publishCalls.length;
+
+    const resolved = await app(
+      request("/api/conflicts/" + openConflict.id + "/resolve", {
+        method: "POST",
+        headers: ADMIN_HEADERS,
+        body: JSON.stringify({
+          resolution: "merged",
+          action: "save",
+          mergedSource: cms,
+          mergedPath: "content/available.md",
+        }),
+      }),
+    );
+
+    assert.equal(resolved.status, 200);
+    const document = (await payload(resolved)).data;
+    assert.equal(document.path, "content/available.md");
+    assert.equal(document.source, cms);
+    assert.equal(document.syncStatus, "unpublished");
+    assert.equal(repository.publishCalls.length, publishCallCount);
+    assert.equal(
+      (await database.getOpenContentConflictByArticle(article.id)),
+      null,
+    );
+    const pendingDraft = await database.getDraft(article.id);
+    assert.equal(pendingDraft?.basePath, "content/original.md");
+    assert.equal(pendingDraft?.baseSource, remote);
+    assert.equal(pendingDraft?.baseContentHash, remoteHash);
+    assert.equal((await database.getArticle(article.id))?.path, "content/available.md");
+    assert.equal((await database.getArticle(article.id))?.source, remote);
   });
 
   it("keeps both edits when two devices save the same CMS draft version", async () => {

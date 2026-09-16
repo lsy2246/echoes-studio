@@ -485,10 +485,13 @@ export function createGitHubRepository(options: GitHubRepositoryOptions): GitRep
     const remoteHash = remoteSource === null ? null : await sha256Text(remoteSource);
     if (input.baseContentHash != null && remoteHash !== input.baseContentHash) {
       throw new RepositoryContentConflictError({
-        kind: "delete_edit",
+        issues: ["delete_edit"],
         remotePath: input.path,
         remoteSource,
         remoteContentHash: remoteHash,
+        occupiedPath: null,
+        occupiedSource: null,
+        occupiedContentHash: null,
         remoteCommitSha: baseHead,
       });
     }
@@ -597,12 +600,19 @@ export function createGitHubRepository(options: GitHubRepositoryOptions): GitRep
       const remoteDiverged = input.basePath != null && remoteHash !== input.baseContentHash;
       const targetCollision = remotePath !== input.path && targetHash !== null && targetHash !== input.contentHash;
       const newPathCollision = input.basePath == null && remotePath === input.path && targetHash !== null && targetHash !== input.contentHash;
-      if (targetCollision || newPathCollision || (remoteDiverged && remoteHash !== input.contentHash)) {
+      const pathCollision = targetCollision || newPathCollision;
+      const contentIssue = remoteDiverged && remoteHash !== input.contentHash
+        ? remoteHash === null ? "delete_edit" as const : "edit_edit" as const
+        : null;
+      if (pathCollision || contentIssue) {
         throw new RepositoryContentConflictError({
-          kind: targetCollision || newPathCollision ? "path_collision" : remoteHash === null ? "delete_edit" : "edit_edit",
-          remotePath: targetCollision || newPathCollision ? input.path : remoteHash === null ? null : remotePath,
-          remoteSource: targetCollision || newPathCollision ? targetSource : remoteSource,
-          remoteContentHash: targetCollision || newPathCollision ? targetHash : remoteHash,
+          issues: [...(pathCollision ? ["path_collision" as const] : []), ...(contentIssue ? [contentIssue] : [])],
+          remotePath: remoteHash === null ? null : remotePath,
+          remoteSource,
+          remoteContentHash: remoteHash,
+          occupiedPath: pathCollision ? input.path : null,
+          occupiedSource: pathCollision ? targetSource : null,
+          occupiedContentHash: pathCollision ? targetHash : null,
           remoteCommitSha: baseHead,
         });
       }
@@ -697,10 +707,13 @@ export function createGitHubRepository(options: GitHubRepositoryOptions): GitRep
           conflicts.push({
             publicationId: change.publicationId,
             snapshot: {
-              kind: "delete_edit" as const,
+              issues: ["delete_edit" as const],
               remotePath: change.path,
               remoteSource: remote.source,
               remoteContentHash: remote.hash,
+              occupiedPath: null,
+              occupiedSource: null,
+              occupiedContentHash: null,
               remoteCommitSha: baseHead,
             },
           });
@@ -716,15 +729,21 @@ export function createGitHubRepository(options: GitHubRepositoryOptions): GitRep
         && target.hash !== change.contentHash && !collisionWillMove;
       const newPathCollision = change.basePath == null && remotePath === change.path
         && target.hash !== null && target.hash !== change.contentHash;
-      if (targetCollision || newPathCollision || (remoteDiverged && remote.hash !== change.contentHash)) {
+      const pathCollision = targetCollision || newPathCollision;
+      const contentIssue = remoteDiverged && remote.hash !== change.contentHash
+        ? remote.hash === null ? "delete_edit" as const : "edit_edit" as const
+        : null;
+      if (pathCollision || contentIssue) {
         conflicts.push({
           publicationId: change.publicationId,
           snapshot: {
-            kind: targetCollision || newPathCollision ? "path_collision" as const
-              : remote.hash === null ? "delete_edit" as const : "edit_edit" as const,
-            remotePath: targetCollision || newPathCollision ? change.path : remote.hash === null ? null : remotePath,
-            remoteSource: targetCollision || newPathCollision ? target.source : remote.source,
-            remoteContentHash: targetCollision || newPathCollision ? target.hash : remote.hash,
+            issues: [...(pathCollision ? ["path_collision" as const] : []), ...(contentIssue ? [contentIssue] : [])],
+            remotePath: remote.hash === null ? null : remotePath,
+            remoteSource: remote.source,
+            remoteContentHash: remote.hash,
+            occupiedPath: pathCollision ? change.path : null,
+            occupiedSource: pathCollision ? target.source : null,
+            occupiedContentHash: pathCollision ? target.hash : null,
             remoteCommitSha: baseHead,
           },
         });

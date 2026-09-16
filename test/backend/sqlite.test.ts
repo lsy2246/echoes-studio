@@ -15,7 +15,7 @@ describe("Node SQLite adapter", async () => {
     assert.deepEqual(await database.health(), {
       ok: true,
       adapter: "node-sqlite",
-      schemaVersion: 10,
+      schemaVersion: 11,
     });
     assert.deepEqual(await database.getAutomationSettings(), {
       autoSaveSeconds: 1,
@@ -120,7 +120,7 @@ describe("Node SQLite adapter", async () => {
 
     const upgraded = await createNodeSqliteDatabase(filename);
     try {
-      assert.equal((await upgraded.health()).schemaVersion, 10);
+      assert.equal((await upgraded.health()).schemaVersion, 11);
       assert.equal(
         (await upgraded.getSystemSettings()).passwordHashIterations,
         100_000,
@@ -130,6 +130,38 @@ describe("Node SQLite adapter", async () => {
       upgraded.close();
       await rm(directory, { recursive: true, force: true });
     }
+  });
+
+  it("persists combined content and path conflict details", async () => {
+    const conflict = await database.recordContentConflict({
+      id: "combined-sqlite-conflict",
+      articleId: "article-sqlite",
+      issues: ["path_collision", "edit_edit"],
+      basePath: "content/sqlite.md",
+      baseSource: "base",
+      baseHash: "base-hash",
+      remotePath: "content/sqlite.md",
+      remoteSource: "repository edit",
+      remoteHash: "remote-hash",
+      occupiedPath: "content/occupied.md",
+      occupiedSource: "another article",
+      occupiedHash: "occupied-hash",
+      remoteCommitSha: "abcdef1234567890abcdef1234567890abcdef12",
+      draftPath: "content/occupied.md",
+      draftSource: "cms edit",
+      draftHash: "draft-hash",
+      draftVersion: 1,
+      now: "2026-08-13T00:00:03.000Z",
+    });
+
+    assert.deepEqual(conflict.issues, ["path_collision", "edit_edit"]);
+    assert.equal(conflict.remoteSource, "repository edit");
+    assert.equal(conflict.occupiedSource, "another article");
+    await database.resolveContentConflict(
+      conflict.id,
+      "merged",
+      "2026-08-13T00:00:04.000Z",
+    );
   });
 
   it("reconciles dispatched publications during Git import", async () => {

@@ -1145,13 +1145,16 @@ export function createApp(
             const recorded = await options.database.recordContentConflict({
               id: id(),
               articleId: item.article.id,
-              kind: entry.snapshot.kind,
+              issues: entry.snapshot.issues,
               basePath: item.draft.basePath,
               baseSource: item.draft.baseSource,
               baseHash: item.draft.baseContentHash,
               remotePath: entry.snapshot.remotePath,
               remoteSource: entry.snapshot.remoteSource,
               remoteHash: entry.snapshot.remoteContentHash,
+              occupiedPath: entry.snapshot.occupiedPath,
+              occupiedSource: entry.snapshot.occupiedSource,
+              occupiedHash: entry.snapshot.occupiedContentHash,
               remoteCommitSha: entry.snapshot.remoteCommitSha,
               draftPath: item.article.path,
               draftSource: item.draft.source,
@@ -1268,6 +1271,13 @@ export function createApp(
       ) {
         throw badRequest("resolution must be remote, cms or merged");
       }
+      const action =
+        body.action === undefined
+          ? "publish"
+          : requiredString(body.action, "action", { max: 20 });
+      if (action !== "save" && action !== "publish") {
+        throw badRequest("action must be save or publish");
+      }
       if (resolution === "remote") {
         if (currentConflict.remoteCommitSha.startsWith("cms-draft-v")) {
           await options.database.resolveContentConflict(
@@ -1287,37 +1297,6 @@ export function createApp(
           "remote",
           now(),
         );
-        if (currentConflict.kind === "path_collision") {
-          if (
-            !currentConflict.basePath ||
-            currentConflict.baseSource === null
-          ) {
-            await options.database.deleteArticle(article.id, article.version);
-            return json({ data: null });
-          }
-          const parsed = parseFrontmatter(currentConflict.baseSource);
-          const restored = await options.database.updateArticle(article.id, {
-            expectedVersion: article.version,
-            path: currentConflict.basePath,
-            format: articleFormat(currentConflict.basePath),
-            title: titleFromFrontmatter(
-              parsed.frontmatter,
-              currentConflict.basePath,
-            ),
-            frontmatter: parsed.frontmatter,
-            source: currentConflict.baseSource,
-            contentHash:
-              currentConflict.baseHash ??
-              (await sha256Text(currentConflict.baseSource)),
-            gitCommitSha: currentConflict.remoteCommitSha,
-            now: now(),
-          });
-          return json({
-            data: restored
-              ? { ...restored, draft: null, syncStatus: "synced" }
-              : null,
-          });
-        }
         if (
           currentConflict.remotePath === null ||
           currentConflict.remoteSource === null
@@ -1361,6 +1340,12 @@ export function createApp(
         body.mergedPath === undefined
           ? article.path
           : articlePath(body.mergedPath);
+      if (
+        currentConflict.issues.includes("path_collision") &&
+        resolvedPath === currentConflict.occupiedPath
+      ) {
+        throw badRequest("mergedPath must differ from the occupied path");
+      }
       const contentHash = await sha256Text(resolvedSource);
       const cmsConcurrent =
         currentConflict.remoteCommitSha.startsWith("cms-draft-v");
@@ -1375,6 +1360,103 @@ export function createApp(
       const previousPath = cmsConcurrent
         ? draft.basePath
         : currentConflict.basePath;
+
+      if (action === "save") {
+        const pathOwner = await options.database.getArticleByPath(resolvedPath);
+        if (pathOwner && pathOwner.id !== article.id) {
+          throw conflict("The selected article path is already used in CMS");
+        }
+
+        let savedArticle = article;
+        let draftBasePath: string | null;
+        let draftBaseSource: string | null;
+        let draftBaseHash: string | null;
+
+        if (cmsConcurrent) {
+          draftBasePath = draft.basePath;
+          draftBaseSource = draft.baseSource;
+          draftBaseHash = draft.baseContentHash;
+          if (resolvedPath !== article.path) {
+            const renamed = await options.database.updateArticle(article.id, {
+              expectedVersion: article.version,
+              path: resolvedPath,
+              format: articleFormat(resolvedPath),
+              now: now(),
+            });
+            if (!renamed)
+              throw conflict("Article changed while saving the resolved path");
+            savedArticle = renamed;
+          }
+        } else if (
+          currentConflict.remotePath !== null &&
+          currentConflict.remoteSource !== null
+        ) {
+          const parsed = parseFrontmatter(currentConflict.remoteSource);
+          const remoteHash =
+            currentConflict.remoteHash ??
+            (await sha256Text(currentConflict.remoteSource));
+          draftBasePath = currentConflict.remotePath;
+          draftBaseSource = currentConflict.remoteSource;
+          draftBaseHash = remoteHash;
+          const rebased = await options.database.updateArticle(article.id, {
+            expectedVersion: article.version,
+            path: resolvedPath,
+            format: articleFormat(resolvedPath),
+            title: titleFromFrontmatter(parsed.frontmatter, resolvedPath),
+            frontmatter: parsed.frontmatter,
+            source: currentConflict.remoteSource,
+            contentHash: remoteHash,
+            gitCommitSha: currentConflict.remoteCommitSha,
+            now: now(),
+          });
+          if (!rebased)
+            throw conflict("Article changed while saving the resolved draft");
+          savedArticle = rebased;
+        } else {
+          draftBasePath = null;
+          draftBaseSource = null;
+          draftBaseHash = null;
+          const rebased = await options.database.updateArticle(article.id, {
+            expectedVersion: article.version,
+            path: resolvedPath,
+            format: articleFormat(resolvedPath),
+            gitCommitSha: currentConflict.remoteCommitSha,
+            now: now(),
+          });
+          if (!rebased)
+            throw conflict("Article changed while saving the resolved draft");
+          savedArticle = rebased;
+        }
+
+        const savedDraft = await options.database.upsertDraft({
+          articleId: article.id,
+          operation: "upsert",
+          basePath: draftBasePath,
+          expectedVersion: draft.version,
+          source: resolvedSource,
+          contentHash,
+          baseContentHash: draftBaseHash,
+          baseSource: draftBaseSource,
+          now: now(),
+        });
+        if (!savedDraft)
+          throw conflict("Draft changed while saving the conflict result");
+        await recordRevision(
+          article.id,
+          resolvedPath !== article.path ? "move" : "autosave",
+          resolvedPath,
+          resolvedSource,
+          contentHash,
+          savedArticle.gitCommitSha,
+        );
+        await options.database.resolveContentConflict(
+          conflictId,
+          resolution === "merged" ? "merged" : "cms",
+          now(),
+        );
+        return json({ data: articleDocument(savedArticle, savedDraft) });
+      }
+
       let publication = await options.database.createPublication({
         id: id(),
         articleId: article.id,
@@ -1424,13 +1506,16 @@ export function createApp(
           await options.database.recordContentConflict({
             id: currentConflict.id,
             articleId: article.id,
-            kind: error.snapshot.kind,
+            issues: error.snapshot.issues,
             basePath: currentConflict.basePath,
             baseSource: currentConflict.baseSource,
             baseHash: currentConflict.baseHash,
             remotePath: error.snapshot.remotePath,
             remoteSource: error.snapshot.remoteSource,
             remoteHash: error.snapshot.remoteContentHash,
+            occupiedPath: error.snapshot.occupiedPath,
+            occupiedSource: error.snapshot.occupiedSource,
+            occupiedHash: error.snapshot.occupiedContentHash,
             remoteCommitSha: error.snapshot.remoteCommitSha,
             draftPath: resolvedPath,
             draftSource: resolvedSource,
@@ -1602,13 +1687,16 @@ export function createApp(
           const recorded = await options.database.recordContentConflict({
             id: id(),
             articleId,
-            kind: "edit_edit",
+            issues: ["edit_edit"],
             basePath: existingDraft.basePath,
             baseSource: existingDraft.baseSource,
             baseHash: existingDraft.baseContentHash,
             remotePath: article.path,
             remoteSource: existingDraft.source,
             remoteHash: existingDraft.contentHash,
+            occupiedPath: null,
+            occupiedSource: null,
+            occupiedHash: null,
             remoteCommitSha: `cms-draft-v${existingDraft.version}`,
             draftPath: proposedPath,
             draftSource: source,
@@ -1898,13 +1986,16 @@ export function createApp(
           const recorded = await options.database.recordContentConflict({
             id: id(),
             articleId,
-            kind: error.snapshot.kind,
+            issues: error.snapshot.issues,
             basePath: draft.basePath,
             baseSource: draft.baseSource,
             baseHash: draft.baseContentHash,
             remotePath: error.snapshot.remotePath,
             remoteSource: error.snapshot.remoteSource,
             remoteHash: error.snapshot.remoteContentHash,
+            occupiedPath: error.snapshot.occupiedPath,
+            occupiedSource: error.snapshot.occupiedSource,
+            occupiedHash: error.snapshot.occupiedContentHash,
             remoteCommitSha: error.snapshot.remoteCommitSha,
             draftPath: publication.articlePath,
             draftSource: publication.source,

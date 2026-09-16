@@ -74,13 +74,16 @@ export type ContentConflictResolution =
 export interface ContentConflict {
   id: string;
   articleId: string;
-  kind: ContentConflictKind;
+  issues: ContentConflictKind[];
   basePath: string | null;
   baseSource: string | null;
   baseHash: string | null;
   remotePath: string | null;
   remoteSource: string | null;
   remoteHash: string | null;
+  occupiedPath: string | null;
+  occupiedSource: string | null;
+  occupiedHash: string | null;
   remoteCommitSha: string;
   draftPath: string;
   draftSource: string;
@@ -96,13 +99,16 @@ export interface ContentConflict {
 export interface RecordContentConflictInput {
   id: string;
   articleId: string;
-  kind: ContentConflictKind;
+  issues: ContentConflictKind[];
   basePath: string | null;
   baseSource: string | null;
   baseHash: string | null;
   remotePath: string | null;
   remoteSource: string | null;
   remoteHash: string | null;
+  occupiedPath: string | null;
+  occupiedSource: string | null;
+  occupiedHash: string | null;
   remoteCommitSha: string;
   draftPath: string;
   draftSource: string;

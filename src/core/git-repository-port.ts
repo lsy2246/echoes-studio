@@ -56,10 +56,15 @@ export interface RepositoryPublishRequest {
 }
 
 export interface RepositoryConflictSnapshot {
-  kind: "edit_edit" | "delete_edit" | "path_collision";
+  issues: Array<"edit_edit" | "delete_edit" | "path_collision">;
+  /** Latest repository state of the original article. */
   remotePath: string | null;
   remoteSource: string | null;
   remoteContentHash: string | null;
+  /** A different article occupying the CMS draft's requested path. */
+  occupiedPath: string | null;
+  occupiedSource: string | null;
+  occupiedContentHash: string | null;
   remoteCommitSha: string;
 }
 
