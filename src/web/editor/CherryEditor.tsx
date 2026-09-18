@@ -14,6 +14,7 @@ import type {
 } from "../../shared/editor-contract";
 import { validateSource } from "../lib/mdx";
 import {
+  findFencedCodeContentRanges,
   normalizeNestedFencesForCherry,
   restoreNestedFencesFromCherry,
 } from "../lib/markdown-preview";
@@ -85,6 +86,16 @@ interface CherryConstructor {
       onClick: () => void;
     },
   ) => CherryMenuConstructor;
+}
+
+interface CodeMirrorSelectionController {
+  setSelection: (anchor: number, head: number) => void;
+}
+
+interface CherryWithEditorAdapter extends CherryInstanceLike {
+  editor?: {
+    editor?: CodeMirrorSelectionController;
+  };
 }
 
 const FORMAT_ICON = [
@@ -320,6 +331,40 @@ export const CherryEditor = forwardRef<MarkdownEditorDriver, CherryEditorProps>(
           activeScrollSource = "editor";
           schedule(() => adapter.getActiveLine());
         };
+        const editPreviewCodeBlock = (event: MouseEvent) => {
+          if (readOnly || event.button !== 0 || !(event.target instanceof Element)) return;
+          const codeBlock = event.target.closest<HTMLElement>(
+            ".cherry-previewer .cherry-code-expand",
+          );
+          if (!codeBlock || !host.contains(codeBlock)) return;
+
+          const codeBlocks = Array.from(
+            previewScroller?.querySelectorAll<HTMLElement>("[data-type='codeBlock']") ?? [],
+          );
+          const codeBlockIndex = codeBlocks.indexOf(codeBlock);
+          const contentRange = findFencedCodeContentRanges(instance.getMarkdown())[codeBlockIndex];
+          codeBlock.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+          const editButton = host.querySelector<HTMLElement>(
+            ".cherry-previewer-codeBlock-hover-handler .cherry-edit-code-block",
+          );
+          if (!editButton) return;
+          event.preventDefault();
+          const codeMirror = (instance as CherryWithEditorAdapter).editor?.editor;
+          if (!contentRange || !codeMirror?.setSelection) {
+            editButton.click();
+            return;
+          }
+
+          const originalSetSelection = codeMirror.setSelection;
+          codeMirror.setSelection = () => {
+            originalSetSelection.call(codeMirror, contentRange.to, contentRange.from);
+          };
+          try {
+            editButton.click();
+          } finally {
+            codeMirror.setSelection = originalSetSelection;
+          }
+        };
         const followEditorScroll = () => {
           if (activeScrollSource !== "editor") return;
           schedule(() => adapter.getViewportLine() ?? adapter.getActiveLine());
@@ -353,6 +398,7 @@ export const CherryEditor = forwardRef<MarkdownEditorDriver, CherryEditorProps>(
         host.addEventListener("keyup", followCursor, true);
         host.addEventListener("pointerup", followCursor, true);
         host.addEventListener("focusin", followCursor, true);
+        host.addEventListener("click", editPreviewCodeBlock);
         host.addEventListener("wheel", selectScrollSource, { capture: true, passive: true });
         host.addEventListener("pointerdown", selectScrollSource, true);
         editorScroller?.addEventListener("scroll", followEditorScroll, { passive: true });
@@ -363,6 +409,7 @@ export const CherryEditor = forwardRef<MarkdownEditorDriver, CherryEditorProps>(
           host.removeEventListener("keyup", followCursor, true);
           host.removeEventListener("pointerup", followCursor, true);
           host.removeEventListener("focusin", followCursor, true);
+          host.removeEventListener("click", editPreviewCodeBlock);
           host.removeEventListener("wheel", selectScrollSource, true);
           host.removeEventListener("pointerdown", selectScrollSource, true);
           editorScroller?.removeEventListener("scroll", followEditorScroll);

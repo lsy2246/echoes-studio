@@ -2,6 +2,57 @@ const LIST_ITEM = /^(\s*)(?:[-+*]|\d+[.)])\s+/;
 const FENCE_START = /^( +)(`{3,}|~{3,})(.*)$/;
 const ROOT_FENCE_START = /^(`{3,}|~{3,})(.*)$/;
 
+export interface FencedCodeContentRange {
+  from: number;
+  to: number;
+}
+
+/** Returns the source ranges occupied by fenced-code contents, in document order. */
+export function findFencedCodeContentRanges(source: string): FencedCodeContentRange[] {
+  const ranges: FencedCodeContentRange[] = [];
+  let opening: { character: string; length: number; contentStart: number } | null = null;
+  let lineStart = 0;
+
+  while (lineStart <= source.length) {
+    const newline = source.indexOf("\n", lineStart);
+    const lineEnd = newline === -1 ? source.length : newline;
+    const line = source.slice(lineStart, lineEnd).replace(/\r$/, "");
+
+    if (!opening) {
+      const match = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+      if (match) {
+        opening = {
+          character: match[1][0],
+          length: match[1].length,
+          contentStart: newline === -1 ? lineEnd : newline + 1,
+        };
+      }
+    } else {
+      const closing = line.match(/^ {0,3}(`{3,}|~{3,})[\t ]*$/);
+      if (
+        closing
+        && closing[1][0] === opening.character
+        && closing[1].length >= opening.length
+      ) {
+        let contentEnd = lineStart;
+        if (contentEnd > opening.contentStart && source[contentEnd - 1] === "\n") {
+          contentEnd -= 1;
+          if (contentEnd > opening.contentStart && source[contentEnd - 1] === "\r") {
+            contentEnd -= 1;
+          }
+        }
+        ranges.push({ from: opening.contentStart, to: contentEnd });
+        opening = null;
+      }
+    }
+
+    if (newline === -1) break;
+    lineStart = newline + 1;
+  }
+
+  return ranges;
+}
+
 /**
  * Cherry treats fences indented more than three spaces as literal indented
  * code before its list parser can attach them to a nested list item. Existing

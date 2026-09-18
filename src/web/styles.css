@@ -4435,6 +4435,43 @@ select:focus-visible {
   background: #e8f0fe;
 }
 
+/* Code preview language */
+.cms-cherry__host .cherry-previewer pre {
+  padding-top: 52px !important;
+}
+
+.cms-cherry__host .cherry-previewer .cherry-code-expand::before {
+  position: absolute;
+  top: 7px;
+  left: 0;
+  z-index: 1;
+  display: flex;
+  width: 100%;
+  height: 44px;
+  box-sizing: border-box;
+  align-items: center;
+  padding: 0 12px;
+  border-bottom: 1px solid #e2e4e9;
+  border-radius: 6px 6px 0 0;
+  background: #f0f2f5;
+  color: #69707a;
+  content: attr(data-lang);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  pointer-events: none;
+  text-transform: uppercase;
+}
+
+.cms-cherry__host .cherry-previewer .cherry-code-expand {
+  cursor: text;
+}
+
+.cms-cherry__host .cherry-previewer-codeBlock-hover-handler {
+  display: none !important;
+}
+
 .cms-cherry__host .cm-editor .cm-selectionBackground,
 .cms-cherry__host .CodeMirror-selected {
   background: #dbeafe !important;

@@ -7,6 +7,7 @@ import {
   relativeArticlePath,
 } from "../../src/web/lib/article-tree";
 import {
+  findFencedCodeContentRanges,
   normalizeNestedFencesForCherry,
   restoreNestedFencesFromCherry,
 } from "../../src/web/lib/markdown-preview";
@@ -77,6 +78,26 @@ test("Cherry preview normalizes nested list fences without changing source", () 
 test("preview compatibility leaves ordinary indented code untouched", () => {
   const source = "Paragraph\n\n    ```text\n    literal fence\n    ```";
   assert.equal(normalizeNestedFencesForCherry(source), source);
+});
+
+test("fenced code ranges include the contents of indented list code blocks", () => {
+  const source = [
+    "- shell",
+    "",
+    "  ```shell",
+    "  echo first",
+    "  echo second",
+    "  ```",
+    "",
+    "```text",
+    "plain",
+    "```",
+  ].join("\n");
+
+  assert.deepEqual(
+    findFencedCodeContentRanges(source).map(({ from, to }) => source.slice(from, to)),
+    ["  echo first\n  echo second", "plain"],
+  );
 });
 
 test("frontmatter controls preserve unknown fields and remove the retired draft flag", () => {
