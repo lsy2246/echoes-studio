@@ -25,6 +25,7 @@ import {
 import {
   findMermaidNodeLabelTarget,
   findMermaidSubgraphLabelTarget,
+  mermaidPanForZoomAnchor,
   nextMermaidScale,
 } from "../../src/web/editor/mermaid-preview";
 import {
@@ -165,6 +166,17 @@ test("Mermaid zoom supports small diagrams without moving the pan layer", () => 
   assert.equal(nextMermaidScale(0.01, "out"), 0.01);
   assert.equal(nextMermaidScale(0.004, "out", 0.002), 0.0033);
   assert.equal(nextMermaidScale(7, "in"), 8);
+});
+
+test("Mermaid zoom keeps the point under the mouse stationary", () => {
+  assert.deepEqual(
+    mermaidPanForZoomAnchor(20, -10, 1, 2, 350, 180, 250, 200),
+    { panX: -80, panY: 10 },
+  );
+  assert.deepEqual(
+    mermaidPanForZoomAnchor(20, -10, 2, 1, 350, 180, 250, 200),
+    { panX: 70, panY: -20 },
+  );
 });
 
 test("preview search mirrors Cherry search options", () => {

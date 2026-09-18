@@ -4532,7 +4532,6 @@ select:focus-visible {
   max-width: none !important;
   max-height: none !important;
   transform-origin: center center;
-  transition: transform 120ms ease-out;
   user-select: none;
 }
 

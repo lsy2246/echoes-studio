@@ -265,11 +265,50 @@ export function nextMermaidScale(
   return Math.min(MAX_SCALE, Math.max(minimum, +next.toFixed(4)));
 }
 
+export function mermaidPanForZoomAnchor(
+  panX: number,
+  panY: number,
+  currentScale: number,
+  nextScale: number,
+  anchorX: number,
+  anchorY: number,
+  visualCenterX: number,
+  visualCenterY: number,
+): { panX: number; panY: number } {
+  if (currentScale <= 0 || currentScale === nextScale) return { panX, panY };
+  const ratio = nextScale / currentScale;
+  return {
+    panX: panX + (anchorX - visualCenterX) * (1 - ratio),
+    panY: panY + (anchorY - visualCenterY) * (1 - ratio),
+  };
+}
+
 function zoomFigure(
   state: MermaidFigureState,
   direction: "in" | "out",
+  anchor?: { x: number; y: number },
 ): void {
-  state.scale = nextMermaidScale(state.scale, direction, state.minScale);
+  const nextScale = nextMermaidScale(
+    state.scale,
+    direction,
+    state.minScale,
+  );
+  if (anchor && nextScale !== state.scale) {
+    const bounds = state.svg.getBoundingClientRect();
+    const pan = mermaidPanForZoomAnchor(
+      state.panX,
+      state.panY,
+      state.scale,
+      nextScale,
+      anchor.x,
+      anchor.y,
+      bounds.left + bounds.width / 2,
+      bounds.top + bounds.height / 2,
+    );
+    state.panX = pan.panX;
+    state.panY = pan.panY;
+  }
+  state.scale = nextScale;
   state.fitted = false;
   updateTransform(state);
 }
@@ -375,10 +414,26 @@ function installFigure(
   );
   figure.appendChild(toolbar);
 
-  const pointer = { active: false, moved: false, x: 0, y: 0 };
+  const pointer: {
+    active: boolean;
+    moved: boolean;
+    id: number | null;
+    x: number;
+    y: number;
+  } = { active: false, moved: false, id: null, x: 0, y: 0 };
+  const resetPan = () => {
+    const capturedId = pointer.id;
+    pointer.active = false;
+    pointer.id = null;
+    canvas.classList.remove("is-panning");
+    if (capturedId !== null && canvas.hasPointerCapture(capturedId)) {
+      canvas.releasePointerCapture(capturedId);
+    }
+  };
   const onPointerDown = (event: PointerEvent) => {
     if (event.button !== 0) return;
     event.stopPropagation();
+    resetPan();
     pointer.moved = false;
     if (
       (event.target as Element | null)?.closest(
@@ -386,14 +441,20 @@ function installFigure(
       )
     )
       return;
+    event.preventDefault();
     pointer.active = true;
+    pointer.id = event.pointerId;
     pointer.x = event.clientX;
     pointer.y = event.clientY;
     canvas.setPointerCapture(event.pointerId);
     canvas.classList.add("is-panning");
   };
   const onPointerMove = (event: PointerEvent) => {
-    if (!pointer.active) return;
+    if (!pointer.active || pointer.id !== event.pointerId) return;
+    if ((event.buttons & 1) === 0) {
+      resetPan();
+      return;
+    }
     const dx = event.clientX - pointer.x;
     const dy = event.clientY - pointer.y;
     if (Math.abs(dx) + Math.abs(dy) > 3) pointer.moved = true;
@@ -404,13 +465,16 @@ function installFigure(
     state.fitted = false;
     updateTransform(state);
   };
-  const stopPan = () => {
-    pointer.active = false;
-    canvas.classList.remove("is-panning");
+  const stopPan = (event: PointerEvent) => {
+    if (pointer.id !== null && event.pointerId !== pointer.id) return;
+    resetPan();
   };
   const onWheel = (event: WheelEvent) => {
     event.preventDefault();
-    zoomFigure(state, event.deltaY < 0 ? "in" : "out");
+    zoomFigure(state, event.deltaY < 0 ? "in" : "out", {
+      x: event.clientX,
+      y: event.clientY,
+    });
   };
 
   const closeEditor = () => {
@@ -580,9 +644,11 @@ function installFigure(
   canvas.addEventListener("pointermove", onPointerMove);
   canvas.addEventListener("pointerup", stopPan);
   canvas.addEventListener("pointercancel", stopPan);
+  canvas.addEventListener("lostpointercapture", resetPan);
   canvas.addEventListener("wheel", onWheel, { passive: false });
   figure.addEventListener("click", onClick);
   canvas.addEventListener("keydown", onKeyDown);
+  window.addEventListener("blur", resetPan);
   requestAnimationFrame(() => fitFigure(state));
   const resizeObserver = new ResizeObserver(() => {
     if (state.fitted) fitFigure(state);
@@ -596,9 +662,11 @@ function installFigure(
     canvas.removeEventListener("pointermove", onPointerMove);
     canvas.removeEventListener("pointerup", stopPan);
     canvas.removeEventListener("pointercancel", stopPan);
+    canvas.removeEventListener("lostpointercapture", resetPan);
     canvas.removeEventListener("wheel", onWheel);
     figure.removeEventListener("click", onClick);
     canvas.removeEventListener("keydown", onKeyDown);
+    window.removeEventListener("blur", resetPan);
     if (canvas.parentElement === figure) {
       if (svg.parentElement === stage) figure.insertBefore(svg, canvas);
       canvas.remove();
