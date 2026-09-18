@@ -7,6 +7,7 @@ import {
   relativeArticlePath,
 } from "../../src/web/lib/article-tree";
 import {
+  findFencedCodeBlocks,
   findFencedCodeContentRanges,
   normalizeNestedFencesForCherry,
   restoreNestedFencesFromCherry,
@@ -21,6 +22,14 @@ import {
   activeArticleHeadingLine,
   extractArticleHeadings,
 } from "../../src/web/lib/article-outline";
+import {
+  findMermaidNodeLabelTarget,
+  findMermaidSubgraphLabelTarget,
+} from "../../src/web/editor/mermaid-preview";
+import {
+  buildPreviewSearchRegex,
+  matchesPreviewSearch,
+} from "../../src/web/editor/preview-search";
 
 function article(id: string, path: string, title = id): ArticleSummary {
   return {
@@ -98,6 +107,73 @@ test("fenced code ranges include the contents of indented list code blocks", () 
     findFencedCodeContentRanges(source).map(({ from, to }) => source.slice(from, to)),
     ["  echo first\n  echo second", "plain"],
   );
+  assert.deepEqual(findFencedCodeBlocks(source).map(({ language }) => language), ["shell", "text"]);
+});
+
+test("Mermaid node labels can span source lines", () => {
+  const source = [
+    "flowchart TD",
+    "  A[服务 A SDK]",
+    "  B[服务 B SDK<br/>",
+    "    TraceID=trace-001<br/>",
+    "    SpanID=b-001<br/>",
+    "    ParentSpanID=a-001]",
+    "  A --> B",
+  ].join("\n");
+
+  const target = findMermaidNodeLabelTarget(source, "B");
+  assert.ok(target);
+  assert.equal(
+    target.value,
+    "服务 B SDK\nTraceID=trace-001\nSpanID=b-001\nParentSpanID=a-001",
+  );
+  const replacement = target.replace(target.value.replace(/\r?\n/g, "<br/>"));
+  const updated = `${source.slice(0, target.from)}${replacement}${source.slice(target.to)}`;
+  assert.match(
+    updated,
+    /B\["服务 B SDK<br\/>TraceID=trace-001<br\/>SpanID=b-001<br\/>ParentSpanID=a-001"\]/,
+  );
+
+  const quotedSource = 'flowchart TD\n  API["Kubernetes API Server"]';
+  const quotedTarget = findMermaidNodeLabelTarget(quotedSource, "API");
+  assert.ok(quotedTarget);
+  const quotedUpdated = `${quotedSource.slice(0, quotedTarget.from)}${quotedTarget.replace("K8S API")}${quotedSource.slice(quotedTarget.to)}`;
+  assert.match(quotedUpdated, /API\["K8S API"\]/);
+});
+
+test("Mermaid subgraph titles expose their visible names", () => {
+  const source = [
+    "flowchart TD",
+    '  subgraph K8S["Kubernetes 集群"]',
+    '    API["Kubernetes API Server"]',
+    "  end",
+  ].join("\n");
+
+  const target = findMermaidSubgraphLabelTarget(source, "K8S", 20);
+  assert.ok(target);
+  assert.equal(target.value, "Kubernetes 集群");
+  const replacement = target.replace("生产集群");
+  const from = target.from - 20;
+  const to = target.to - 20;
+  const updated = `${source.slice(0, from)}${replacement}${source.slice(to)}`;
+  assert.match(updated, /subgraph K8S\["生产集群"\]/);
+});
+
+test("preview search mirrors Cherry search options", () => {
+  const insensitive = buildPreviewSearchRegex("K8S", false, false, false);
+  assert.ok(insensitive);
+  assert.deepEqual("k8s K8S".match(insensitive), ["k8s", "K8S"]);
+
+  const literal = buildPreviewSearchRegex("a+b", true, false, false);
+  assert.ok(literal);
+  assert.deepEqual("a+b A+B".match(literal), ["a+b"]);
+
+  const regex = buildPreviewSearchRegex("K(?:8S|ubernetes)", false, false, true);
+  assert.ok(regex);
+  assert.deepEqual("K8S kubernetes".match(regex), ["K8S", "kubernetes"]);
+  assert.equal(matchesPreviewSearch("Nginx Ingress Controller", regex), false);
+  assert.equal(matchesPreviewSearch("Kubernetes 集群", regex), true);
+  assert.equal(buildPreviewSearchRegex("[", false, false, true), null);
 });
 
 test("frontmatter controls preserve unknown fields and remove the retired draft flag", () => {

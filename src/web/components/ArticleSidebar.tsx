@@ -20,6 +20,7 @@ interface ArticleSidebarProps {
   onSelect: (article: ArticleSummary) => void;
   onNew: () => void;
   onNewInFolder: (folderPath: string) => void;
+  onRenameArticle: (article: ArticleSummary) => void;
   onMoveArticle: (article: ArticleSummary, folderPath?: string) => void;
   onRevertArticle: (article: ArticleSummary) => void;
   onDeleteArticle: (article: ArticleSummary) => void;
@@ -239,6 +240,7 @@ export function ArticleSidebar({
   onSelect,
   onNew,
   onNewInFolder,
+  onRenameArticle,
   onMoveArticle,
   onRevertArticle,
   onDeleteArticle,
@@ -396,7 +398,10 @@ export function ArticleSidebar({
   useEffect(() => {
     setSelectedIds((current) => {
       const next = new Set([...current].filter((articleId) => selectableIds.has(articleId)));
-      return next.size === current.size ? current : next;
+      const unchanged =
+        next.size === current.size &&
+        [...next].every((articleId) => current.has(articleId));
+      return unchanged ? current : next;
     });
     if (selectableArticles.length === 0) setSelectionMode(false);
   }, [articles, activeId, activeSaveState]);
@@ -670,6 +675,7 @@ export function ArticleSidebar({
           <button type="button" role="menuitem" onClick={() => { onNewInFolder(contextMenu.folderPath); setContextMenu(null); }}><Icon name="plus" size={15} />在此新建文章</button>
           {contextMenu.article ? (
             <>
+              <button type="button" role="menuitem" onClick={() => { onRenameArticle(contextMenu.article!); setContextMenu(null); }}><Icon name="edit" size={15} />重命名文章…</button>
               <button type="button" role="menuitem" onClick={() => { onMoveArticle(contextMenu.article!); setContextMenu(null); }}><Icon name="move" size={15} />移动文章…</button>
               {["unpublished", "deleting", "error"].includes(contextMenu.article.syncStatus) ? (
                 <button

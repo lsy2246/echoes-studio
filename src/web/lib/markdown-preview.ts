@@ -7,10 +7,19 @@ export interface FencedCodeContentRange {
   to: number;
 }
 
-/** Returns the source ranges occupied by fenced-code contents, in document order. */
-export function findFencedCodeContentRanges(source: string): FencedCodeContentRange[] {
-  const ranges: FencedCodeContentRange[] = [];
-  let opening: { character: string; length: number; contentStart: number } | null = null;
+export interface FencedCodeBlockRange extends FencedCodeContentRange {
+  language: string;
+}
+
+/** Returns fenced-code blocks and their content ranges, in document order. */
+export function findFencedCodeBlocks(source: string): FencedCodeBlockRange[] {
+  const ranges: FencedCodeBlockRange[] = [];
+  let opening: {
+    character: string;
+    length: number;
+    contentStart: number;
+    language: string;
+  } | null = null;
   let lineStart = 0;
 
   while (lineStart <= source.length) {
@@ -25,6 +34,7 @@ export function findFencedCodeContentRanges(source: string): FencedCodeContentRa
           character: match[1][0],
           length: match[1].length,
           contentStart: newline === -1 ? lineEnd : newline + 1,
+          language: match[2].trim().split(/\s+/)[0] ?? "",
         };
       }
     } else {
@@ -41,7 +51,11 @@ export function findFencedCodeContentRanges(source: string): FencedCodeContentRa
             contentEnd -= 1;
           }
         }
-        ranges.push({ from: opening.contentStart, to: contentEnd });
+        ranges.push({
+          from: opening.contentStart,
+          to: contentEnd,
+          language: opening.language,
+        });
         opening = null;
       }
     }
@@ -51,6 +65,11 @@ export function findFencedCodeContentRanges(source: string): FencedCodeContentRa
   }
 
   return ranges;
+}
+
+/** Returns the source ranges occupied by fenced-code contents, in document order. */
+export function findFencedCodeContentRanges(source: string): FencedCodeContentRange[] {
+  return findFencedCodeBlocks(source).map(({ from, to }) => ({ from, to }));
 }
 
 /**

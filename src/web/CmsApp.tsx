@@ -26,6 +26,7 @@ import { MdxPreview } from "./components/MdxPreview";
 import { MoveArticleDialog } from "./components/MoveArticleDialog";
 import { PublishArticleDialog } from "./components/PublishArticleDialog";
 import { RevertArticleDialog } from "./components/RevertArticleDialog";
+import { RenameArticleDialog } from "./components/RenameArticleDialog";
 import { SetupScreen, type SetupValues } from "./components/SetupScreen";
 import { SystemSettingsDialog } from "./components/SystemSettingsDialog";
 import { VersionHistoryDialog } from "./components/VersionHistoryDialog";
@@ -250,6 +251,7 @@ export function CmsApp({ apiClient }: CmsAppProps) {
   const [newDialogOpen, setNewDialogOpen] = useState(false);
   const [newArticleDirectory, setNewArticleDirectory] = useState("src/content");
   const [moveDialogOpen, setMoveDialogOpen] = useState(false);
+  const [renameDialogOpen, setRenameDialogOpen] = useState(false);
   const [publishDialogOpen, setPublishDialogOpen] = useState(false);
   const [publishTargetIds, setPublishTargetIds] = useState<string[]>([]);
   const [deleteCandidate, setDeleteCandidate] = useState<ArticleSummary | null>(
@@ -706,6 +708,11 @@ export function CmsApp({ apiClient }: CmsAppProps) {
           );
           setNoticeUrl(null);
           setSaveState("clean");
+          await Promise.all([
+            loadArticles(false),
+            loadRepositoryStatus(),
+            loadConflicts(),
+          ]);
           return;
         }
         const publishedArticle = result.article;
@@ -719,6 +726,11 @@ export function CmsApp({ apiClient }: CmsAppProps) {
         );
         setNoticeUrl(result.pullRequestUrl ?? null);
         setSaveState("clean");
+        await Promise.all([
+          loadArticles(false),
+          loadRepositoryStatus(),
+          loadConflicts(),
+        ]);
       } catch (error) {
         if (!isUnauthorized(error) || !handleUnauthorized()) {
           setWorkspaceError(errorMessage(error));
@@ -737,6 +749,7 @@ export function CmsApp({ apiClient }: CmsAppProps) {
       handleUnauthorized,
       loadArticles,
       loadConflicts,
+      loadRepositoryStatus,
       publishing,
       saveState,
       source,
@@ -826,7 +839,11 @@ export function CmsApp({ apiClient }: CmsAppProps) {
             : `已将 ${selected.length} 篇文章合并为一个 commit 并推送。`,
         );
         setNoticeUrl(null);
-        await Promise.all([loadRepositoryStatus(), loadConflicts()]);
+        await Promise.all([
+          loadArticles(false),
+          loadRepositoryStatus(),
+          loadConflicts(),
+        ]);
       } catch (error) {
         if (!isUnauthorized(error) || !handleUnauthorized()) {
           setWorkspaceError(errorMessage(error));
@@ -1180,6 +1197,14 @@ export function CmsApp({ apiClient }: CmsAppProps) {
     [client, flushDraft, handleUnauthorized, loadArticle, saveState],
   );
 
+  const renameArticle = useCallback(
+    async (article: ArticleSummary) => {
+      await loadArticle(article);
+      if (activeIdRef.current === article.id) setRenameDialogOpen(true);
+    },
+    [loadArticle],
+  );
+
   const deleteSelectedArticle = useCallback(async () => {
     const candidate = deleteCandidate;
     if (!candidate || deleteBusy) return;
@@ -1467,6 +1492,7 @@ export function CmsApp({ apiClient }: CmsAppProps) {
           setNewArticleDirectory(folderPath);
           setNewDialogOpen(true);
         }}
+        onRenameArticle={(article) => void renameArticle(article)}
         onMoveArticle={(article, folderPath) =>
           void moveArticleToFolder(article, folderPath)
         }
@@ -1967,6 +1993,28 @@ export function CmsApp({ apiClient }: CmsAppProps) {
             if (targets.length === 1 && targets[0] === activeArticle?.id)
               void publish(commitMessage);
             else void publishMany(targets, commitMessage);
+          }}
+        />
+      ) : null}
+
+      {activeArticle ? (
+        <RenameArticleDialog
+          open={renameDialogOpen}
+          currentPath={path}
+          occupiedPaths={articles
+            .filter((article) => article.id !== activeArticle.id)
+            .map((article) => article.path)}
+          onClose={() => setRenameDialogOpen(false)}
+          onRename={(nextPath) => {
+            changeRevisionRef.current += 1;
+            pathRef.current = nextPath;
+            setPath(nextPath);
+            setSaveState("dirty");
+            setRenameDialogOpen(false);
+            setNotice(
+              "新文件名将自动保存到 CMS，并出现在“待同步”列表；仓库尚未发生变化。",
+            );
+            setNoticeUrl(null);
           }}
         />
       ) : null}

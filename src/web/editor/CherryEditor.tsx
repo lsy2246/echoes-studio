@@ -23,6 +23,8 @@ import {
   CherryMarkdownAdapter,
   type CherryInstanceLike,
 } from "./cherry-adapter";
+import { enhanceMermaidPreviews } from "./mermaid-preview";
+import { enhancePreviewSearch } from "./preview-search";
 import { extractArticleHeadings } from "../lib/article-outline";
 
 interface CherryEditorProps {
@@ -195,6 +197,16 @@ export const CherryEditor = forwardRef<MarkdownEditorDriver, CherryEditorProps>(
     useLayoutEffect(() => {
       let disposed = false;
       let stopActiveLineTracking = () => {};
+      let stopMermaidPreviewTracking = () => {};
+      let stopPreviewSearchTracking = () => {};
+      let mermaidEnhancerStarted = false;
+      const startMermaidEnhancer = (currentInstance: CherryInstanceLike | null) => {
+        if (mermaidEnhancerStarted || !currentInstance) return;
+        const host = hostRef.current;
+        if (!host) return;
+        mermaidEnhancerStarted = true;
+        stopMermaidPreviewTracking = enhanceMermaidPreviews(host, currentInstance, readOnly);
+      };
       setLoadError(null);
 
       void import("cherry-markdown").then((module) => {
@@ -283,9 +295,11 @@ export const CherryEditor = forwardRef<MarkdownEditorDriver, CherryEditorProps>(
               );
               formatButton?.setAttribute("title", "格式化 Markdown");
               formatButton?.setAttribute("aria-label", "格式化 Markdown");
+              startMermaidEnhancer(instance);
               onReadyRef.current?.();
             },
             afterChange: (markdown) => {
+              startMermaidEnhancer(instance);
               const canonicalMarkdown = restoreNestedFencesFromCherry(markdown);
               if (disposed || canonicalMarkdown === valueRef.current) return;
               valueRef.current = canonicalMarkdown;
@@ -306,6 +320,8 @@ export const CherryEditor = forwardRef<MarkdownEditorDriver, CherryEditorProps>(
 
         const host = hostRef.current;
         if (!host) return;
+        startMermaidEnhancer(instance);
+        stopPreviewSearchTracking = enhancePreviewSearch(host);
         const editorScroller = host.querySelector<HTMLElement>(".cm-scroller");
         const previewScroller = host.querySelector<HTMLElement>(".cherry-previewer");
         let activeScrollSource: "editor" | "preview" = "editor";
@@ -424,6 +440,8 @@ export const CherryEditor = forwardRef<MarkdownEditorDriver, CherryEditorProps>(
       return () => {
         disposed = true;
         stopActiveLineTracking();
+        stopMermaidPreviewTracking();
+        stopPreviewSearchTracking();
         driverRef.current?.destroy();
         driverRef.current = null;
         if (hostRef.current) hostRef.current.replaceChildren();
