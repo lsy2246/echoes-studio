@@ -1,7 +1,13 @@
 export type ArticleFormat = "md" | "mdx";
 
 export type CmsSyncStatus =
-  "synced" | "unpublished" | "deleting" | "syncing" | "conflict" | "error";
+  | "synced"
+  | "unpublished"
+  | "committed"
+  | "deleting"
+  | "syncing"
+  | "conflict"
+  | "error";
 
 export interface ArticleMetadata {
   title: string;
@@ -100,6 +106,32 @@ export interface PublishArticlesResult {
   publicationIds: string[];
   commitSha?: string | null;
   branch?: string | null;
+}
+
+export interface PendingCommitChange {
+  articleId: string;
+  articleTitle: string;
+  operation: "upsert" | "delete";
+  path: string;
+}
+
+export interface PendingCommit {
+  id: string;
+  message: string;
+  changes: PendingCommitChange[];
+  createdAt: string;
+}
+
+export interface CreatePendingCommitInput {
+  items: Array<{ id: string; version: number }>;
+  message: string;
+}
+
+export interface PushPendingCommitsResult {
+  commitSha: string;
+  branch: string | null;
+  pushedCommitCount: number;
+  articles: Array<ArticleDocument | null>;
 }
 
 export interface MediaAsset {
@@ -213,6 +245,10 @@ export interface CmsApiClient {
   discardDraft(id: string, version: number): Promise<ArticleDocument | null>;
   publishArticle(input: PublishArticleInput): Promise<PublishArticleResult>;
   publishArticles(input: PublishArticlesInput): Promise<PublishArticlesResult>;
+  listPendingCommits(): Promise<PendingCommit[]>;
+  createPendingCommit(input: CreatePendingCommitInput): Promise<PendingCommit>;
+  undoPendingCommit(id: string): Promise<void>;
+  pushPendingCommits(): Promise<PushPendingCommitsResult>;
   deleteArticle(id: string, version: number): Promise<ArticleDocument | null>;
   listArticleRevisions(id: string): Promise<ArticleRevision[]>;
   restoreArticleRevision(

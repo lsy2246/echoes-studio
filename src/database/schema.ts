@@ -89,6 +89,14 @@ CREATE TABLE IF NOT EXISTS cms_publications (
 CREATE INDEX IF NOT EXISTS cms_publications_article_idx ON cms_publications(article_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS cms_publications_reconcile_idx ON cms_publications(article_path, content_hash, status);
 
+CREATE TABLE IF NOT EXISTS cms_pending_commits (
+  id TEXT PRIMARY KEY,
+  message TEXT NOT NULL,
+  changes_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS cms_pending_commits_created_idx ON cms_pending_commits(created_at, id);
+
 CREATE TABLE IF NOT EXISTS cms_sync_checkpoints (
   checkpoint_id TEXT PRIMARY KEY,
   commit_sha TEXT NOT NULL,
@@ -122,6 +130,8 @@ ON CONFLICT(id) DO NOTHING;
 
 INSERT INTO cms_schema_version(version, applied_at)
 VALUES (11, CURRENT_TIMESTAMP) ON CONFLICT(version) DO NOTHING;
+INSERT INTO cms_schema_version(version, applied_at)
+VALUES (12, CURRENT_TIMESTAMP) ON CONFLICT(version) DO NOTHING;
 `;
 
 export const POSTGRES_SCHEMA_V1 = `
@@ -221,6 +231,14 @@ ALTER TABLE cms_drafts ADD COLUMN IF NOT EXISTS operation TEXT NOT NULL DEFAULT 
 CREATE INDEX IF NOT EXISTS cms_publications_article_idx ON cms_publications(article_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS cms_publications_reconcile_idx ON cms_publications(article_path, content_hash, status);
 
+CREATE TABLE IF NOT EXISTS cms_pending_commits (
+  id TEXT PRIMARY KEY,
+  message TEXT NOT NULL,
+  changes_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS cms_pending_commits_created_idx ON cms_pending_commits(created_at, id);
+
 CREATE TABLE IF NOT EXISTS cms_sync_checkpoints (
   checkpoint_id TEXT PRIMARY KEY,
   commit_sha TEXT NOT NULL,
@@ -260,4 +278,6 @@ ON CONFLICT(id) DO NOTHING;
 
 INSERT INTO cms_schema_version(version, applied_at)
 VALUES (11, CURRENT_TIMESTAMP::TEXT) ON CONFLICT(version) DO NOTHING;
+INSERT INTO cms_schema_version(version, applied_at)
+VALUES (12, CURRENT_TIMESTAMP::TEXT) ON CONFLICT(version) DO NOTHING;
 `;

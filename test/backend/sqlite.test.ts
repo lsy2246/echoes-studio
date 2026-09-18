@@ -15,7 +15,7 @@ describe("Node SQLite adapter", async () => {
     assert.deepEqual(await database.health(), {
       ok: true,
       adapter: "node-sqlite",
-      schemaVersion: 11,
+      schemaVersion: 12,
     });
     assert.deepEqual(await database.getAutomationSettings(), {
       autoSaveSeconds: 1,
@@ -76,6 +76,43 @@ describe("Node SQLite adapter", async () => {
     );
   });
 
+  it("persists pending commits and only undoes the latest one", async () => {
+    const change = {
+      articleId: "article-sqlite",
+      articleTitle: "SQLite",
+      operation: "upsert" as const,
+      path: "content/sqlite.md",
+      previousPath: null,
+      source: "---\ntitle: SQLite\n---\n\nQueued\n",
+      contentHash: "queued-hash",
+      basePath: null,
+      baseContentHash: null,
+      baseSource: null,
+      draftVersion: 1,
+    };
+    await database.createPendingCommit({
+      id: "pending-sqlite-1",
+      message: "First local commit",
+      changes: [change],
+      now: "2026-08-13T00:00:03.000Z",
+    });
+    await database.createPendingCommit({
+      id: "pending-sqlite-2",
+      message: "Second local commit",
+      changes: [{ ...change, contentHash: "queued-hash-2", draftVersion: 2 }],
+      now: "2026-08-13T00:00:04.000Z",
+    });
+
+    assert.deepEqual(
+      (await database.listPendingCommits()).map((commit) => commit.message),
+      ["First local commit", "Second local commit"],
+    );
+    assert.equal(await database.deleteLatestPendingCommit("pending-sqlite-1"), false);
+    assert.equal(await database.deleteLatestPendingCommit("pending-sqlite-2"), true);
+    await database.deletePendingCommits(["pending-sqlite-1"]);
+    assert.equal((await database.listPendingCommits()).length, 0);
+  });
+
   it("upgrades an existing v5 draft table without deleting its data", async () => {
     const directory = await mkdtemp(join(tmpdir(), "echoes-studio-v5-"));
     const filename = join(directory, "studio.sqlite");
@@ -120,7 +157,7 @@ describe("Node SQLite adapter", async () => {
 
     const upgraded = await createNodeSqliteDatabase(filename);
     try {
-      assert.equal((await upgraded.health()).schemaVersion, 11);
+      assert.equal((await upgraded.health()).schemaVersion, 12);
       assert.equal(
         (await upgraded.getSystemSettings()).passwordHashIterations,
         100_000,

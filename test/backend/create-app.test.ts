@@ -856,6 +856,83 @@ describe("createApp repository orchestration", () => {
     assert.equal(await database.getDraft(second.id), null);
   });
 
+  it("queues local commits without repository writes and pushes the queue once", async () => {
+    const database = new MemoryDatabase();
+    const repository = new FakeRepository();
+    repository.publishResult = {
+      mode: "direct",
+      status: "published",
+      commitSha: "6".repeat(40),
+      branch: "main",
+    };
+    const app = createApp(appOptions(database, repository));
+    const client = new FetchCmsApiClient({
+      baseUrl: "https://studio.example/api",
+      token: "admin-secret",
+      fetch: ((input: URL | RequestInfo, init?: RequestInit) =>
+        app(new Request(input, init))) as typeof globalThis.fetch,
+    });
+    const first = await client.createArticle({
+      path: "content/queued-first.md",
+      format: "md",
+      source: "---\ntitle: Queued first\n---\n\nOne\n",
+    });
+    const second = await client.createArticle({
+      path: "content/queued-second.md",
+      format: "md",
+      source: "---\ntitle: Queued second\n---\n\nTwo\n",
+    });
+
+    const firstCommit = await client.createPendingCommit({
+      items: [{ id: first.id, version: first.version }],
+      message: "完成第一篇",
+    });
+    const secondCommit = await client.createPendingCommit({
+      items: [{ id: second.id, version: second.version }],
+      message: "完成第二篇",
+    });
+
+    assert.equal(repository.publishCalls.length, 0);
+    assert.equal(repository.publishBatchCalls.length, 0);
+    assert.deepEqual(
+      (await client.listPendingCommits()).map((commit) => commit.message),
+      ["完成第一篇", "完成第二篇"],
+    );
+    assert.equal((await client.getArticle(first.id)).syncStatus, "committed");
+    assert.equal((await client.getArticle(second.id)).syncStatus, "committed");
+
+    await client.undoPendingCommit(secondCommit.id);
+    assert.deepEqual(
+      (await client.listPendingCommits()).map((commit) => commit.id),
+      [firstCommit.id],
+    );
+    assert.equal((await client.getArticle(second.id)).syncStatus, "unpublished");
+    await client.createPendingCommit({
+      items: [{ id: second.id, version: second.version }],
+      message: "重新完成第二篇",
+    });
+    const laterSource = `${first.source}\nLater draft edit\n`;
+    await client.saveDraft({
+      id: first.id,
+      path: "content/queued-first-later.md",
+      source: laterSource,
+      version: first.version,
+    });
+
+    const pushed = await client.pushPendingCommits();
+
+    assert.equal(pushed.pushedCommitCount, 2);
+    assert.equal(repository.publishBatchCalls.length, 1);
+    assert.equal(repository.publishBatchCalls[0]?.changes.length, 2);
+    assert.equal(repository.publishBatchCalls[0]?.commitMessage, "发布 2 个本地提交：重新完成第二篇");
+    assert.equal((await client.listPendingCommits()).length, 0);
+    const firstAfterPush = await client.getArticle(first.id);
+    assert.equal(firstAfterPush.syncStatus, "unpublished");
+    assert.equal(firstAfterPush.path, "content/queued-first-later.md");
+    assert.equal(firstAfterPush.source, laterSource);
+    assert.equal((await client.getArticle(second.id)).syncStatus, "synced");
+  });
+
   it("marks a published article for deletion and only deletes on a separate publish", async () => {
     const database = new MemoryDatabase();
     const repository = new FakeRepository();

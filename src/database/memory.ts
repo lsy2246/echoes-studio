@@ -13,11 +13,13 @@ import type {
   CreateArticleInput,
   CreateArticleRevisionInput,
   CreatePublicationInput,
+  CreatePendingCommitInput,
   Draft,
   HealthStatus,
   ImportBatchInput,
   ImportBatchResult,
   Publication,
+  PendingCommit,
   RecordContentConflictInput,
   UpdateArticleInput,
   UpsertDraftInput,
@@ -35,6 +37,7 @@ export class MemoryDatabase implements DatabasePort {
   private readonly drafts = new Map<string, Draft>();
   private readonly articleRevisions = new Map<string, ArticleRevision>();
   private readonly publications = new Map<string, Publication>();
+  private readonly pendingCommits = new Map<string, PendingCommit>();
   private readonly contentConflicts = new Map<string, ContentConflict>();
   private readonly syncCheckpoints = new Set<string>();
   private automationSettings: AutomationSettings = {
@@ -424,14 +427,18 @@ export class MemoryDatabase implements DatabasePort {
     this.publications.set(input.id, completed);
     if (input.status === "published") {
       const article = this.articles.get(current.articleId);
+      const draft = this.drafts.get(current.articleId);
+      const hasNewerDraft = Boolean(draft && draft.version !== current.draftVersion);
       if (article) {
         const parsed = parseFrontmatter(current.source);
         this.articles.set(article.id, {
           ...article,
-          path: current.articlePath,
-          format: current.articlePath.toLowerCase().endsWith(".mdx")
-            ? "mdx"
-            : "md",
+          path: hasNewerDraft ? article.path : current.articlePath,
+          format: hasNewerDraft
+            ? article.format
+            : current.articlePath.toLowerCase().endsWith(".mdx")
+              ? "mdx"
+              : "md",
           title: titleFromFrontmatter(parsed.frontmatter, current.articlePath),
           frontmatter: parsed.frontmatter,
           source: current.source,
@@ -441,11 +448,51 @@ export class MemoryDatabase implements DatabasePort {
           updatedAt: input.now,
         });
       }
-      const draft = this.drafts.get(current.articleId);
-      if (draft?.version === current.draftVersion)
+      if (draft?.version === current.draftVersion) {
         this.drafts.delete(current.articleId);
+      } else if (draft) {
+        this.drafts.set(current.articleId, {
+          ...draft,
+          basePath: current.articlePath,
+          baseSource: current.source,
+          baseContentHash: current.contentHash,
+        });
+      }
     }
     return clone(completed);
+  }
+
+  async listPendingCommits(): Promise<PendingCommit[]> {
+    return [...this.pendingCommits.values()]
+      .sort((left, right) =>
+        left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id),
+      )
+      .map(clone);
+  }
+
+  async createPendingCommit(
+    input: CreatePendingCommitInput,
+  ): Promise<PendingCommit> {
+    if (this.pendingCommits.has(input.id))
+      throw conflict("Pending commit already exists");
+    const pendingCommit: PendingCommit = {
+      id: input.id,
+      message: input.message,
+      changes: clone(input.changes),
+      createdAt: input.now,
+    };
+    this.pendingCommits.set(input.id, pendingCommit);
+    return clone(pendingCommit);
+  }
+
+  async deleteLatestPendingCommit(id: string): Promise<boolean> {
+    const latest = (await this.listPendingCommits()).at(-1);
+    if (!latest || latest.id !== id) return false;
+    return this.pendingCommits.delete(id);
+  }
+
+  async deletePendingCommits(ids: string[]): Promise<void> {
+    for (const id of ids) this.pendingCommits.delete(id);
   }
 
   async importBatch(input: ImportBatchInput): Promise<ImportBatchResult> {

@@ -10,11 +10,13 @@ import type {
   CreateArticleInput,
   CreateArticleRevisionInput,
   CreatePublicationInput,
+  CreatePendingCommitInput,
   Draft,
   HealthStatus,
   ImportBatchInput,
   ImportBatchResult,
   Publication,
+  PendingCommit,
   RecordContentConflictInput,
   UpdateArticleInput,
   UpsertDraftInput,
@@ -60,6 +62,11 @@ export interface DatabasePort {
   getPublication(id: string): Promise<Publication | null>;
   markPublicationDispatched(id: string, now: string): Promise<void>;
   completePublication(input: CompletePublicationInput): Promise<Publication | null>;
+
+  listPendingCommits(): Promise<PendingCommit[]>;
+  createPendingCommit(input: CreatePendingCommitInput): Promise<PendingCommit>;
+  deleteLatestPendingCommit(id: string): Promise<boolean>;
+  deletePendingCommits(ids: string[]): Promise<void>;
 
   importBatch(input: ImportBatchInput): Promise<ImportBatchResult>;
 }

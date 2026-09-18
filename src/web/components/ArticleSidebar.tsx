@@ -34,17 +34,21 @@ interface ArticleSidebarProps {
   syncingRepository: boolean;
   pushingRepository: boolean;
   onPullRepository: () => void;
-  onPushCurrent: () => void;
-  onPushSelected: (articleIds: string[]) => void;
+  onCommitCurrent: () => void;
+  onCommitSelected: (articleIds: string[]) => void;
+  onOpenPendingCommits: () => void;
+  onPushPendingCommits: () => void;
+  pendingCommitCount: number;
   onOpenConflicts: () => void;
   conflictCount: number;
 }
 
-type ArticleFilter = "all" | "pending" | "conflict";
+type ArticleFilter = "all" | "draft" | "committed" | "conflict";
 
 const SYNC_LABEL: Record<CmsSyncStatus, string> = {
   synced: "已同步",
-  unpublished: "待推送",
+  unpublished: "草稿",
+  committed: "待推送",
   deleting: "待删除",
   syncing: "同步中",
   conflict: "有冲突",
@@ -254,8 +258,11 @@ export function ArticleSidebar({
   syncingRepository,
   pushingRepository,
   onPullRepository,
-  onPushCurrent,
-  onPushSelected,
+  onCommitCurrent,
+  onCommitSelected,
+  onOpenPendingCommits,
+  onPushPendingCommits,
+  pendingCommitCount,
   onOpenConflicts,
   conflictCount,
 }: ArticleSidebarProps) {
@@ -282,9 +289,11 @@ export function ArticleSidebar({
           article.id === activeId
           && ["dirty", "saving", "error"].includes(activeSaveState)
         );
+      const isDraft = isLocallyChanged && article.syncStatus !== "committed" && article.syncStatus !== "conflict";
       const statusMatches = filter === "all"
-        || (filter === "pending" ? isLocallyChanged
-          : article.syncStatus === "conflict");
+        || (filter === "draft" ? isDraft
+          : filter === "committed" ? article.syncStatus === "committed"
+            : article.syncStatus === "conflict");
       const haystack = [
         article.metadata.title,
         article.path,
@@ -376,7 +385,7 @@ export function ArticleSidebar({
   };
 
   const pendingCount = articles.filter((article) =>
-    article.syncStatus !== "synced"
+    (["unpublished", "deleting", "error"].includes(article.syncStatus))
     || (
       article.id === activeId
       && ["dirty", "saving", "error"].includes(activeSaveState)
@@ -434,7 +443,7 @@ export function ArticleSidebar({
   };
 
   const enterSelectionMode = () => {
-    setFilter("pending");
+    setFilter("draft");
     setSelectionMode(true);
     setSelectedIds(new Set());
   };
@@ -490,13 +499,14 @@ export function ArticleSidebar({
       <div className="article-filters" role="group" aria-label="筛选文章状态">
         {([
           ["all", "全部", articles.length],
-          ["pending", "待同步", pendingCount],
+          ["draft", "草稿", pendingCount],
+          ["committed", "待推送", articles.filter((article) => article.syncStatus === "committed").length],
           ["conflict", "冲突", conflictCount],
         ] as const).map(([value, label, count]) => (
           <button
             key={value}
             type="button"
-            className={`${filter === value ? "is-active" : ""}${value === "pending" && count > 0 ? " has-pending" : ""}`}
+            className={`${filter === value ? "is-active" : ""}${(value === "draft" || value === "committed") && count > 0 ? " has-pending" : ""}`}
             onClick={() => setFilter(value)}
             aria-pressed={filter === value}
             title={value === "conflict" ? "只显示有冲突的文章" : undefined}
@@ -621,46 +631,69 @@ export function ArticleSidebar({
             </button>
           ) : null}
           <button
-            className="repository-sync-button"
+            className="repository-sync-button repository-sync-button--pull"
             type="button"
             onClick={onPullRepository}
             disabled={syncingRepository || pushingRepository || repositoryLoading || !repositoryStatus?.configured}
           >
             {syncingRepository ? <span className="spinner" aria-hidden="true" /> : <Icon name="refresh" size={14} />}
-            {syncingRepository ? "拉取中…" : "拉取仓库"}
+            {syncingRepository ? "正在拉取…" : "拉取最新"}
           </button>
-          <button
-            className="repository-sync-button repository-sync-button--push"
-            type="button"
-            onClick={onPushCurrent}
-            disabled={selectionMode || syncingRepository || pushingRepository || repositoryLoading || !repositoryStatus?.configured || !activeId || !selectableIds.has(activeId)}
-          >
-            {pushingRepository ? <span className="spinner" aria-hidden="true" /> : <Icon name="publish" size={14} />}
-            {pushingRepository ? "推送中…" : "推送当前"}
-          </button>
-          {selectionMode ? (
+          <div className="repository-action-row">
             <button
-              className="repository-sync-button repository-sync-button--batch"
+              className="repository-sync-button"
               type="button"
-              onClick={() => {
-                const ids = [...selectedIds];
-                if (ids.length === 0) return;
-                onPushSelected(ids);
-              }}
-              disabled={syncingRepository || pushingRepository || repositoryLoading || !repositoryStatus?.configured || selectedIds.size === 0}
+              onClick={onCommitCurrent}
+              disabled={selectionMode || syncingRepository || pushingRepository || repositoryLoading || !repositoryStatus?.configured || !activeId || !selectableIds.has(activeId)}
             >
-              <Icon name="publish" size={14} />推送所选<strong>{selectedIds.size}</strong>
+              {pushingRepository ? <span className="spinner" aria-hidden="true" /> : <Icon name="save" size={14} />}
+              {pushingRepository ? "处理中…" : "提交当前"}
             </button>
-          ) : selectableArticles.length > 1 ? (
+            {selectionMode ? (
+              <button
+                className="repository-sync-button repository-sync-button--batch"
+                type="button"
+                onClick={() => {
+                  const ids = [...selectedIds];
+                  if (ids.length === 0) return;
+                  onCommitSelected(ids);
+                }}
+                disabled={syncingRepository || pushingRepository || repositoryLoading || !repositoryStatus?.configured || selectedIds.size === 0}
+              >
+                <Icon name="save" size={14} />提交所选<strong>{selectedIds.size}</strong>
+              </button>
+            ) : selectableArticles.length > 1 ? (
+              <button
+                className="repository-sync-button repository-sync-button--batch"
+                type="button"
+                onClick={() => onCommitSelected(selectableArticles.map((article) => article.id))}
+                disabled={syncingRepository || pushingRepository || repositoryLoading || !repositoryStatus?.configured}
+                aria-label={`提交全部 ${selectableArticles.length} 篇待同步文章`}
+              >
+                <Icon name="save" size={14} />提交全部<strong>{selectableArticles.length}</strong>
+              </button>
+            ) : null}
+          </div>
+          <div className="repository-action-row">
             <button
-              className="repository-sync-button repository-sync-button--batch"
+              className="repository-sync-button repository-sync-button--queue"
               type="button"
-              onClick={enterSelectionMode}
-              disabled={syncingRepository || pushingRepository || repositoryLoading || !repositoryStatus?.configured}
+              onClick={onOpenPendingCommits}
+              aria-label={`打开待推送列表，共 ${pendingCommitCount} 个提交`}
+              title="查看待推送列表"
             >
-              批量推送<strong>{selectableArticles.length}</strong>
+              <Icon name="history" size={14} />待推送列表<strong>{pendingCommitCount}</strong>
             </button>
-          ) : null}
+            <button
+              className="repository-sync-button repository-sync-button--push"
+              type="button"
+              onClick={onPushPendingCommits}
+              disabled={pushingRepository || repositoryLoading || !repositoryStatus?.configured || pendingCommitCount === 0}
+              aria-label={`推送全部 ${pendingCommitCount} 个待推送提交`}
+            >
+              <Icon name="publish" size={14} />推送全部<strong>{pendingCommitCount}</strong>
+            </button>
+          </div>
         </div>
       </section>
       {contextMenu ? (

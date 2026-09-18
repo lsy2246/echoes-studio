@@ -16,12 +16,14 @@ import type {
   CreateArticleInput,
   CreateArticleRevisionInput,
   CreatePublicationInput,
+  CreatePendingCommitInput,
   Draft,
   Frontmatter,
   HealthStatus,
   ImportBatchInput,
   ImportBatchResult,
   Publication,
+  PendingCommit,
   RecordContentConflictInput,
   UpdateArticleInput,
   UpsertDraftInput,
@@ -189,6 +191,17 @@ function mapPublication(row: SqlRow): Publication {
     createdAt: text(row, "created_at"),
     updatedAt: text(row, "updated_at"),
     completedAt: nullableText(row, "completed_at"),
+  };
+}
+
+function mapPendingCommit(row: SqlRow): PendingCommit {
+  const changes = JSON.parse(text(row, "changes_json")) as PendingCommit["changes"];
+  if (!Array.isArray(changes)) throw new TypeError("Invalid pending commit changes in database");
+  return {
+    id: text(row, "id"),
+    message: text(row, "message"),
+    changes,
+    createdAt: text(row, "created_at"),
   };
 }
 
@@ -708,13 +721,20 @@ export class SqlDatabase implements DatabasePort {
         throw conflict("Publication was completed concurrently");
       if (input.status === "published") {
         const parsed = parseSourceFrontmatter(current.source);
+        const latestArticle = await scoped.getArticle(current.articleId);
+        const latestDraft = await scoped.getDraft(current.articleId);
+        const hasNewerDraft = Boolean(
+          latestDraft && latestDraft.version !== current.draftVersion,
+        );
         await executor.run(
           `UPDATE cms_articles SET path = ?, format = ?, title = ?, frontmatter_json = ?, source = ?, content_hash = ?,
            git_commit_sha = COALESCE(?, git_commit_sha), version = version + 1,
            updated_at = ? WHERE id = ?`,
           [
-            current.articlePath,
-            current.articlePath.toLowerCase().endsWith(".mdx") ? "mdx" : "md",
+            hasNewerDraft && latestArticle ? latestArticle.path : current.articlePath,
+            hasNewerDraft && latestArticle
+              ? latestArticle.format
+              : current.articlePath.toLowerCase().endsWith(".mdx") ? "mdx" : "md",
             titleFromFrontmatter(parsed.frontmatter, current.articlePath),
             JSON.stringify(parsed.frontmatter),
             current.source,
@@ -728,9 +748,71 @@ export class SqlDatabase implements DatabasePort {
           "DELETE FROM cms_drafts WHERE article_id = ? AND version = ?",
           [current.articleId, current.draftVersion],
         );
+        await executor.run(
+          `UPDATE cms_drafts SET base_path = ?, base_source = ?, base_content_hash = ?
+           WHERE article_id = ? AND version <> ?`,
+          [
+            current.articlePath,
+            current.source,
+            current.contentHash,
+            current.articleId,
+            current.draftVersion,
+          ],
+        );
       }
       return scoped.getPublication(input.id);
     });
+  }
+
+  async listPendingCommits(): Promise<PendingCommit[]> {
+    const rows = await this.executor.all(
+      "SELECT * FROM cms_pending_commits ORDER BY created_at ASC, id ASC",
+    );
+    return rows.map(mapPendingCommit);
+  }
+
+  async createPendingCommit(
+    input: CreatePendingCommitInput,
+  ): Promise<PendingCommit> {
+    try {
+      await this.executor.run(
+        `INSERT INTO cms_pending_commits (id, message, changes_json, created_at)
+         VALUES (?, ?, ?, ?)`,
+        [input.id, input.message, JSON.stringify(input.changes), input.now],
+      );
+    } catch (error) {
+      if (isUniqueError(error)) throw conflict("Pending commit already exists");
+      throw error;
+    }
+    return {
+      id: input.id,
+      message: input.message,
+      changes: structuredClone(input.changes),
+      createdAt: input.now,
+    };
+  }
+
+  async deleteLatestPendingCommit(id: string): Promise<boolean> {
+    return this.executor.withTransaction(async (executor) => {
+      const latest = await executor.all<{ id: unknown }>(
+        "SELECT id FROM cms_pending_commits ORDER BY created_at DESC, id DESC LIMIT 1",
+      );
+      if (latest[0]?.id !== id) return false;
+      const result = await executor.run(
+        "DELETE FROM cms_pending_commits WHERE id = ?",
+        [id],
+      );
+      return result.changes === 1;
+    });
+  }
+
+  async deletePendingCommits(ids: string[]): Promise<void> {
+    if (ids.length === 0) return;
+    const placeholders = ids.map(() => "?").join(", ");
+    await this.executor.run(
+      `DELETE FROM cms_pending_commits WHERE id IN (${placeholders})`,
+      ids,
+    );
   }
 
   async importBatch(input: ImportBatchInput): Promise<ImportBatchResult> {

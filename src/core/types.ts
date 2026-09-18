@@ -34,6 +34,34 @@ export interface Draft {
   updatedAt: string;
 }
 
+export interface PendingCommitChange {
+  articleId: string;
+  articleTitle: string;
+  operation: "upsert" | "delete";
+  path: string;
+  previousPath: string | null;
+  source: string;
+  contentHash: string;
+  basePath: string | null;
+  baseContentHash: string | null;
+  baseSource: string | null;
+  draftVersion: number;
+}
+
+export interface PendingCommit {
+  id: string;
+  message: string;
+  changes: PendingCommitChange[];
+  createdAt: string;
+}
+
+export interface CreatePendingCommitInput {
+  id: string;
+  message: string;
+  changes: PendingCommitChange[];
+  now: string;
+}
+
 export type ArticleRevisionKind =
   | "repository"
   | "autosave"

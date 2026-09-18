@@ -116,7 +116,7 @@ export async function createNodeSqliteDatabase(
       );
     }
     connection.exec(
-      "INSERT INTO cms_schema_version(version, applied_at) VALUES (11, CURRENT_TIMESTAMP) ON CONFLICT(version) DO NOTHING",
+      "INSERT INTO cms_schema_version(version, applied_at) VALUES (12, CURRENT_TIMESTAMP) ON CONFLICT(version) DO NOTHING",
     );
   }
   const database = new SqlDatabase(

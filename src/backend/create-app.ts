@@ -28,6 +28,8 @@ import type {
   Frontmatter,
   ImportArticleInput,
   JsonValue,
+  PendingCommit,
+  PendingCommitChange,
 } from "../core/types";
 import type { AuthScope, CreateAppOptions } from "./types";
 
@@ -234,6 +236,7 @@ function articleSummary(
   article: Article,
   draft: Draft | null,
   hasConflict = false,
+  committed = false,
 ): Record<string, unknown> {
   return {
     id: article.id,
@@ -241,7 +244,9 @@ function articleSummary(
     format: article.format,
     syncStatus: hasConflict
       ? "conflict"
-      : draft?.operation === "delete"
+        : committed
+          ? "committed"
+          : draft?.operation === "delete"
         ? "deleting"
         : draft
           ? "unpublished"
@@ -258,12 +263,47 @@ function articleDocument(
   article: Article,
   draft: Draft | null,
   hasConflict = false,
+  committed = false,
 ): Record<string, unknown> {
   return {
-    ...articleSummary(article, draft, hasConflict),
+    ...articleSummary(article, draft, hasConflict, committed),
     source: draft?.source ?? article.source,
     baseGitHash: article.gitCommitSha ? article.contentHash : null,
   };
+}
+
+function pendingCommitView(commit: PendingCommit): Record<string, unknown> {
+  return {
+    id: commit.id,
+    message: commit.message,
+    createdAt: commit.createdAt,
+    changes: commit.changes.map((change) => ({
+      articleId: change.articleId,
+      articleTitle: change.articleTitle,
+      operation: change.operation,
+      path: change.path,
+    })),
+  };
+}
+
+function latestPendingChanges(commits: PendingCommit[]): Map<string, PendingCommitChange> {
+  const changes = new Map<string, PendingCommitChange>();
+  for (const commit of commits) {
+    for (const change of commit.changes) changes.set(change.articleId, change);
+  }
+  return changes;
+}
+
+function draftMatchesPendingChange(
+  draft: Draft | null,
+  article: Article,
+  change: PendingCommitChange | undefined,
+): boolean {
+  if (!draft || !change) return false;
+  return change.operation === draft.operation
+    && change.path === (draft.operation === "delete" ? (draft.basePath ?? article.path) : article.path)
+    && change.contentHash === draft.contentHash
+    && change.draftVersion === draft.version;
 }
 
 function bearerToken(request: Request): string | null {
@@ -992,6 +1032,226 @@ export function createApp(
       methodNotAllowed(["GET", "PATCH"]);
     }
 
+    if (path === "/api/pending-commits") {
+      if (request.method === "GET") {
+        return json({
+          data: (await options.database.listPendingCommits()).map(pendingCommitView),
+        });
+      }
+      if (request.method !== "POST") methodNotAllowed(["GET", "POST"]);
+      const body = await readJson(request, maxBodyBytes);
+      const message = requiredString(body.message, "message", { max: 200 }).trim();
+      if (!Array.isArray(body.items) || body.items.length === 0 || body.items.length > 100) {
+        throw badRequest("items must contain between 1 and 100 articles");
+      }
+      const requested = body.items.map((value, index) => {
+        if (!isRecord(value)) throw badRequest(`items[${index}] must be an object`);
+        const articleId = requiredString(value.id, `items[${index}].id`, { max: 200 });
+        const expectedVersion = optionalInteger(value.version, `items[${index}].version`);
+        if (expectedVersion === undefined) {
+          throw new AppError(428, "precondition_required", `items[${index}].version is required`);
+        }
+        return { articleId, expectedVersion };
+      });
+      if (new Set(requested.map((item) => item.articleId)).size !== requested.length) {
+        throw badRequest("items must not contain duplicate article ids");
+      }
+      const changes: PendingCommitChange[] = [];
+      for (const item of requested) {
+        const article = await options.database.getArticle(item.articleId);
+        if (!article) throw notFound("Article not found");
+        const draft = await options.database.getDraft(item.articleId);
+        if (!draft) throw notFound("Draft not found");
+        if (draft.version !== item.expectedVersion) {
+          throw conflict("Draft version is stale", {
+            articleId: article.id,
+            currentVersion: draft.version,
+          });
+        }
+        const openConflict = await options.database.getOpenContentConflictByArticle(article.id);
+        if (openConflict) {
+          throw conflict("Resolve the open content conflict before committing", {
+            articleId: article.id,
+            conflictId: openConflict.id,
+          });
+        }
+        changes.push({
+          articleId: article.id,
+          articleTitle: articleMetadata(article, draft).title as string,
+          operation: draft.operation,
+          path: draft.operation === "delete" ? (draft.basePath ?? article.path) : article.path,
+          previousPath:
+            draft.operation === "upsert" && draft.basePath && draft.basePath !== article.path
+              ? draft.basePath
+              : null,
+          source: draft.source,
+          contentHash: draft.contentHash,
+          basePath: draft.basePath,
+          baseContentHash: draft.baseContentHash,
+          baseSource: draft.baseSource,
+          draftVersion: draft.version,
+        });
+      }
+      const pending = await options.database.createPendingCommit({
+        id: id(),
+        message,
+        changes,
+        now: now(),
+      });
+      return json({ data: pendingCommitView(pending) }, { status: 201 });
+    }
+
+    const pendingCommitRoute = path.match(/^\/api\/pending-commits\/([^/]+)$/);
+    if (pendingCommitRoute && pendingCommitRoute[1] !== "push") {
+      if (request.method !== "DELETE") methodNotAllowed(["DELETE"]);
+      const commitId = decodeURIComponent(pendingCommitRoute[1]);
+      if (!(await options.database.deleteLatestPendingCommit(commitId))) {
+        throw conflict("Only the latest pending commit can be undone");
+      }
+      return json({ data: { undone: true } });
+    }
+
+    if (path === "/api/pending-commits/push") {
+      if (request.method !== "POST") methodNotAllowed(["POST"]);
+      const commits = await options.database.listPendingCommits();
+      if (commits.length === 0) throw conflict("There are no pending commits to push");
+      const changes = [...latestPendingChanges(commits).values()];
+      const prepared: Array<{
+        article: Article;
+        change: PendingCommitChange;
+        publicationId: string;
+        publicationCreated: boolean;
+        repositoryChange: RepositoryBatchPublishChange;
+      }> = [];
+      for (const change of changes) {
+        const article = await options.database.getArticle(change.articleId);
+        if (!article) throw conflict("A queued article no longer exists", { articleId: change.articleId });
+        const publicationId = id();
+        prepared.push({
+          article,
+          change,
+          publicationId,
+          publicationCreated: false,
+          repositoryChange: change.operation === "delete"
+            ? {
+                operation: "delete",
+                publicationId,
+                path: change.path,
+                baseContentHash: change.baseContentHash,
+              }
+            : {
+                operation: "upsert",
+                publicationId,
+                path: change.path,
+                previousPath: change.previousPath ?? undefined,
+                source: change.source,
+                contentHash: change.contentHash,
+                basePath: change.basePath,
+                baseContentHash: change.baseContentHash,
+              },
+        });
+      }
+      for (const item of prepared) {
+        if (item.change.operation === "delete") continue;
+        await options.database.createPublication({
+          id: item.publicationId,
+          articleId: item.article.id,
+          articlePath: item.change.path,
+          source: item.change.source,
+          contentHash: item.change.contentHash,
+          draftVersion: item.change.draftVersion,
+          now: now(),
+        });
+        await options.database.markPublicationDispatched(item.publicationId, now());
+        item.publicationCreated = true;
+      }
+      const failPublications = async (message: string) => {
+        await Promise.all(prepared.filter((item) => item.publicationCreated).map((item) =>
+          options.database.completePublication({
+            id: item.publicationId,
+            status: "failed",
+            error: message,
+            now: now(),
+          }),
+        ));
+      };
+      let result: RepositoryPublishResult;
+      try {
+        result = await options.repository.publishBatch({
+          batchId: id(),
+          changes: prepared.map((item) => item.repositoryChange),
+          mode: "direct",
+          commitMessage: commits.length === 1
+            ? commits[0].message
+            : `发布 ${commits.length} 个本地提交：${commits.at(-1)!.message}`.slice(0, 200),
+        });
+      } catch (error) {
+        options.onError?.(error, request);
+        await failPublications("Repository pending commit push failed");
+        if (error instanceof RepositoryBatchContentConflictError) {
+          const conflictIds: string[] = [];
+          for (const entry of error.conflicts) {
+            const item = prepared.find((candidate) => candidate.publicationId === entry.publicationId);
+            if (!item) continue;
+            const recorded = await options.database.recordContentConflict({
+              id: id(),
+              articleId: item.article.id,
+              issues: entry.snapshot.issues,
+              basePath: item.change.basePath,
+              baseSource: item.change.baseSource,
+              baseHash: item.change.baseContentHash,
+              remotePath: entry.snapshot.remotePath,
+              remoteSource: entry.snapshot.remoteSource,
+              remoteHash: entry.snapshot.remoteContentHash,
+              occupiedPath: entry.snapshot.occupiedPath,
+              occupiedSource: entry.snapshot.occupiedSource,
+              occupiedHash: entry.snapshot.occupiedContentHash,
+              remoteCommitSha: entry.snapshot.remoteCommitSha,
+              draftPath: item.change.path,
+              draftSource: item.change.source,
+              draftHash: item.change.contentHash,
+              draftVersion: item.change.draftVersion,
+              now: now(),
+            });
+            conflictIds.push(recorded.id);
+          }
+          throw conflict("Repository and queued commits contain conflicting changes", { conflictIds });
+        }
+        throw new AppError(502, "bad_gateway", "Repository pending commit push failed");
+      }
+      if (result.status !== "published" || !result.commitSha || !/^[0-9a-f]{7,64}$/i.test(result.commitSha)) {
+        await failPublications("Repository returned an invalid pending commit push result");
+        throw new AppError(502, "bad_gateway", "Repository returned an invalid pending commit push result");
+      }
+      const articles: Array<Record<string, unknown> | null> = [];
+      for (const item of prepared) {
+        if (item.change.operation === "delete") {
+          const current = await options.database.getArticle(item.article.id);
+          if (current && !(await options.database.deleteArticle(current.id, current.version))) {
+            throw conflict("Article changed while completing queued deletion", { articleId: current.id });
+          }
+          articles.push(null);
+          continue;
+        }
+        await options.database.completePublication({
+          id: item.publicationId,
+          status: "published",
+          contentHash: item.change.contentHash,
+          commitSha: result.commitSha,
+          now: now(),
+        });
+        const article = await options.database.getArticle(item.article.id);
+        articles.push(article ? articleDocument(article, await options.database.getDraft(article.id)) : null);
+      }
+      await options.database.deletePendingCommits(commits.map((commit) => commit.id));
+      return json({
+        commitSha: result.commitSha,
+        branch: result.branch ?? null,
+        pushedCommitCount: commits.length,
+        articles,
+      });
+    }
+
     if (path === "/api/articles/publish-batch") {
       if (request.method !== "POST") methodNotAllowed(["POST"]);
       const body = await readJson(request, maxBodyBytes);
@@ -1586,6 +1846,9 @@ export function createApp(
           cursor: url.searchParams.get("cursor") ?? undefined,
           search: url.searchParams.get("search")?.slice(0, 200),
         });
+        const pendingChanges = latestPendingChanges(
+          await options.database.listPendingCommits(),
+        );
         const entries = await Promise.all(
           result.items.map(async (article) => ({
             article,
@@ -1602,6 +1865,8 @@ export function createApp(
           draft,
           syncStatus: hasConflict
             ? "conflict"
+            : draftMatchesPendingChange(draft, article, pendingChanges.get(article.id))
+              ? "committed"
             : draft?.operation === "delete"
               ? "deleting"
               : undefined,
@@ -2266,7 +2531,15 @@ export function createApp(
         const hasConflict = Boolean(
           await options.database.getOpenContentConflictByArticle(articleId),
         );
-        return json(articleDocument(article, draft, hasConflict), {
+        const pendingChanges = latestPendingChanges(
+          await options.database.listPendingCommits(),
+        );
+        return json(articleDocument(
+          article,
+          draft,
+          hasConflict,
+          draftMatchesPendingChange(draft, article, pendingChanges.get(article.id)),
+        ), {
           headers: { etag: `"${draft?.version ?? 0}"` },
         });
       }

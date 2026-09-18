@@ -6,7 +6,6 @@ interface PublishArticleDialogProps {
   busy: boolean;
   articleTitles: string[];
   defaultMessage: string;
-  branch: string;
   onClose: () => void;
   onConfirm: (commitMessage: string) => void;
 }
@@ -16,7 +15,6 @@ export function PublishArticleDialog({
   busy,
   articleTitles,
   defaultMessage,
-  branch,
   onClose,
   onConfirm,
 }: PublishArticleDialogProps) {
@@ -62,9 +60,9 @@ export function PublishArticleDialog({
         <header>
           <span className="dialog-icon"><Icon name="publish" size={22} /></span>
           <div>
-            <span className="eyebrow">Commit &amp; push</span>
-            <h2 id={`${id}-title`}>{articleTitles.length > 1 ? `推送所选 ${articleTitles.length} 篇文章` : "推送当前文章"}</h2>
-            <p id={`${id}-description`}>提交说明会显示在 Git 历史中，随后安全推送到 {branch || "目标分支"}。</p>
+            <span className="eyebrow">Local commit</span>
+            <h2 id={`${id}-title`}>{articleTitles.length > 1 ? `提交所选 ${articleTitles.length} 篇文章` : "提交当前文章"}</h2>
+            <p id={`${id}-description`}>保存到待推送队列。此操作不会连接或更新远端仓库。</p>
           </div>
           <button className="icon-button" type="button" onClick={onClose} disabled={busy} aria-label="关闭">
             <Icon name="close" />
@@ -73,14 +71,14 @@ export function PublishArticleDialog({
 
         <div className="dialog-fields">
           <div className="publish-target-card">
-            <span>{articleTitles.length > 1 ? "本次将合并为一个 commit" : "本次文章"}</span>
+            <span>{articleTitles.length > 1 ? "本次本地提交" : "本次文章"}</span>
             <strong>{articleTitles.length > 1 ? `${articleTitles.length} 篇待同步文章` : articleTitles[0]}</strong>
             {articleTitles.length > 1 ? (
               <small className="publish-target-card__articles" title={articleTitles.join("、")}>
                 {articleTitles.slice(0, 3).join("、")}{articleTitles.length > 3 ? ` 等 ${articleTitles.length} 篇` : ""}
               </small>
             ) : null}
-            <code>{branch || "默认分支"}</code>
+            <code>仅保存在 CMS</code>
           </div>
           <label className="form-field" htmlFor={`${id}-commit-message`}>
             <span>提交说明</span>
@@ -99,7 +97,7 @@ export function PublishArticleDialog({
           </label>
           <p className={`dialog-hint${invalid ? "" : " dialog-hint--ready"}`} role="status">
             <Icon name={invalid ? "warning" : "check"} />
-            {normalized ? "将使用这条说明创建 Git commit" : "请输入提交说明"}
+            {normalized ? "将使用这条说明创建待推送提交" : "请输入提交说明"}
           </p>
         </div>
 
@@ -107,7 +105,7 @@ export function PublishArticleDialog({
           <button className="button button--ghost" type="button" onClick={onClose} disabled={busy}>取消</button>
           <button className="button button--primary" type="submit" disabled={busy || invalid}>
             {busy ? <span className="spinner" aria-hidden="true" /> : <Icon name="publish" />}
-            {busy ? "正在推送…" : "提交并推送"}
+            {busy ? "正在提交…" : "提交到队列"}
           </button>
         </footer>
       </form>

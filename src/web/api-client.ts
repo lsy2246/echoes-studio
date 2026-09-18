@@ -21,6 +21,9 @@ import type {
   SaveDraftInput,
   SaveDraftResult,
   AutomationSettings,
+  CreatePendingCommitInput,
+  PendingCommit,
+  PushPendingCommitsResult,
 } from "../shared/editor-contract";
 import { localizeErrorMessage } from "../core/errors";
 
@@ -241,6 +244,35 @@ export class FetchCmsApiClient implements CmsApiClient {
         mode: input.mode,
         commitMessage: input.commitMessage,
       }),
+    });
+  }
+
+  async listPendingCommits(): Promise<PendingCommit[]> {
+    const payload = await this.#request<DataEnvelope<PendingCommit[]>>(
+      "/pending-commits",
+    );
+    return payload.data;
+  }
+
+  async createPendingCommit(
+    input: CreatePendingCommitInput,
+  ): Promise<PendingCommit> {
+    const payload = await this.#request<DataEnvelope<PendingCommit>>(
+      "/pending-commits",
+      { method: "POST", body: JSON.stringify(input) },
+    );
+    return payload.data;
+  }
+
+  async undoPendingCommit(id: string): Promise<void> {
+    await this.#request(`/pending-commits/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+  }
+
+  async pushPendingCommits(): Promise<PushPendingCommitsResult> {
+    return this.#request<PushPendingCommitsResult>("/pending-commits/push", {
+      method: "POST",
     });
   }
 

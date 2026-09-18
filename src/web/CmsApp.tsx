@@ -11,6 +11,7 @@ import type {
   EditorDiagnostic,
   EditorView,
   MarkdownEditorDriver,
+  PendingCommit,
   RepositoryConnectionTestResult,
   RepositoryStatus,
 } from "../shared/editor-contract";
@@ -25,6 +26,8 @@ import { MetadataPanel, type ArticlePanelSection } from "./components/MetadataPa
 import { MdxPreview } from "./components/MdxPreview";
 import { MoveArticleDialog } from "./components/MoveArticleDialog";
 import { PublishArticleDialog } from "./components/PublishArticleDialog";
+import { PendingCommitsDrawer } from "./components/PendingCommitsDrawer";
+import { PushPendingCommitsDialog } from "./components/PushPendingCommitsDialog";
 import { RevertArticleDialog } from "./components/RevertArticleDialog";
 import { RenameArticleDialog } from "./components/RenameArticleDialog";
 import { SetupScreen, type SetupValues } from "./components/SetupScreen";
@@ -254,6 +257,10 @@ export function CmsApp({ apiClient }: CmsAppProps) {
   const [renameDialogOpen, setRenameDialogOpen] = useState(false);
   const [publishDialogOpen, setPublishDialogOpen] = useState(false);
   const [publishTargetIds, setPublishTargetIds] = useState<string[]>([]);
+  const [pendingCommits, setPendingCommits] = useState<PendingCommit[]>([]);
+  const [pendingCommitsOpen, setPendingCommitsOpen] = useState(false);
+  const [pushConfirmOpen, setPushConfirmOpen] = useState(false);
+  const [pendingCommitsError, setPendingCommitsError] = useState<string | null>(null);
   const [deleteCandidate, setDeleteCandidate] = useState<ArticleSummary | null>(
     null,
   );
@@ -450,6 +457,18 @@ export function CmsApp({ apiClient }: CmsAppProps) {
     }
   }, [client, handleUnauthorized]);
 
+  const loadPendingCommits = useCallback(async (): Promise<boolean> => {
+    try {
+      setPendingCommits(await client.listPendingCommits());
+      return true;
+    } catch (error) {
+      if (!isUnauthorized(error) || !handleUnauthorized()) {
+        setPendingCommitsError(errorMessage(error));
+      }
+      return false;
+    }
+  }, [client, handleUnauthorized]);
+
   useEffect(() => {
     if (apiClient || ALLOW_UNAUTHENTICATED) {
       setAuthChecking(false);
@@ -488,6 +507,7 @@ export function CmsApp({ apiClient }: CmsAppProps) {
         loadRepositoryStatus(),
         loadAutomationSettings(),
         loadConflicts(),
+        loadPendingCommits(),
       ]);
   }, [
     authenticated,
@@ -495,6 +515,7 @@ export function CmsApp({ apiClient }: CmsAppProps) {
     loadAutomationSettings,
     loadConflicts,
     loadRepositoryStatus,
+    loadPendingCommits,
   ]);
 
   useEffect(() => {
@@ -661,102 +682,7 @@ export function CmsApp({ apiClient }: CmsAppProps) {
     path,
   ]);
 
-  const publish = useCallback(
-    async (commitMessage?: string) => {
-      if (!activeArticle || publishing) return;
-      const currentDiagnostics =
-        editorRef.current?.validate() ?? validateSource(source);
-      setDiagnostics(currentDiagnostics);
-      if (currentDiagnostics.some((item) => item.severity === "error")) {
-        setMetadataOpen(true);
-        setWorkspaceError("推送前检查未通过，请先修复文章设置中的错误。");
-        return;
-      }
-      setPublishing(true);
-      setWorkspaceError(null);
-      const saved =
-        saveState === "dirty" || saveState === "saving"
-          ? await flushDraft()
-          : true;
-      if (!saved) {
-        setPublishing(false);
-        return;
-      }
-      const article = activeArticleRef.current;
-      if (!article) {
-        setPublishing(false);
-        return;
-      }
-      try {
-        const result = await client.publishArticle({
-          id: article.id,
-          version: article.version,
-          mode: "direct",
-          commitMessage,
-        });
-        if (!result.article) {
-          activeIdRef.current = null;
-          activeArticleRef.current = null;
-          setActiveArticle(null);
-          setArticles((items) =>
-            items.filter((item) => item.id !== article.id),
-          );
-          setNotice(
-            result.branch === "local"
-              ? "文章已从本地内容目录删除。"
-              : "文章已从仓库主分支删除。",
-          );
-          setNoticeUrl(null);
-          setSaveState("clean");
-          await Promise.all([
-            loadArticles(false),
-            loadRepositoryStatus(),
-            loadConflicts(),
-          ]);
-          return;
-        }
-        const publishedArticle = result.article;
-        setActiveArticle(publishedArticle);
-        activeArticleRef.current = publishedArticle;
-        setArticles((items) => updateArticleSummary(items, publishedArticle));
-        setNotice(
-          result.branch === "local"
-            ? "文章已写入本地内容目录。"
-            : "文章已安全推送到主分支。",
-        );
-        setNoticeUrl(result.pullRequestUrl ?? null);
-        setSaveState("clean");
-        await Promise.all([
-          loadArticles(false),
-          loadRepositoryStatus(),
-          loadConflicts(),
-        ]);
-      } catch (error) {
-        if (!isUnauthorized(error) || !handleUnauthorized()) {
-          setWorkspaceError(errorMessage(error));
-          if (error instanceof CmsApiError && error.status === 409) {
-            await Promise.all([loadConflicts(), loadArticles(false)]);
-          }
-        }
-      } finally {
-        setPublishing(false);
-      }
-    },
-    [
-      activeArticle,
-      client,
-      flushDraft,
-      handleUnauthorized,
-      loadArticles,
-      loadConflicts,
-      loadRepositoryStatus,
-      publishing,
-      saveState,
-      source,
-    ],
-  );
-
-  const publishMany = useCallback(
+  const commitMany = useCallback(
     async (articleIds: string[], commitMessage?: string) => {
       if (publishing || articleIds.length === 0) return;
       const uniqueIds = [...new Set(articleIds)];
@@ -766,7 +692,7 @@ export function CmsApp({ apiClient }: CmsAppProps) {
         setDiagnostics(currentDiagnostics);
         if (currentDiagnostics.some((item) => item.severity === "error")) {
           setMetadataOpen(true);
-          setWorkspaceError("推送前检查未通过，请先修复当前文章设置中的错误。");
+          setWorkspaceError("提交前检查未通过，请先修复当前文章设置中的错误。");
           return;
         }
       }
@@ -790,60 +716,23 @@ export function CmsApp({ apiClient }: CmsAppProps) {
           setNotice("所选文章已经没有待同步改动。");
           return;
         }
-        const result = await client.publishArticles({
+        const pending = await client.createPendingCommit({
           items: selected.map((article) => ({
             id: article.id,
             version: article.version,
           })),
-          mode: "direct",
-          commitMessage,
+          message: commitMessage?.trim() || `更新内容：${selected.length} 篇文章`,
         });
-        const returnedById = new Map(
-          result.articles
-            .filter((article): article is ArticleDocument => Boolean(article))
-            .map((article) => [article.id, article]),
-        );
-        const removedIds = new Set(
-          selected
-            .map((article) => article.id)
-            .filter((articleId) => !returnedById.has(articleId)),
-        );
-        setArticles((items) =>
-          items
-            .filter((article) => !removedIds.has(article.id))
-            .map((article) => returnedById.get(article.id) ?? article),
-        );
+        setPendingCommits((items) => [...items, pending]);
+        await loadArticles(false);
         const currentId = activeIdRef.current;
         if (currentId && uniqueIds.includes(currentId)) {
-          const current = returnedById.get(currentId);
-          if (!current) {
-            activeIdRef.current = null;
-            activeArticleRef.current = null;
-            setActiveArticle(null);
-            setSource("");
-            setPath("");
-          } else {
-            activeArticleRef.current = current;
-            setActiveArticle(current);
-            setSource(current.source);
-            setPath(current.path);
-            setMetadata(
-              parseArticleSource(current.source, current.metadata).metadata,
-            );
-            setSaveState("clean");
-          }
+          const current = await client.getArticle(currentId);
+          activeArticleRef.current = current;
+          setActiveArticle(current);
         }
-        setNotice(
-          localRepository
-            ? `已将 ${selected.length} 篇文章写入本地内容目录。`
-            : `已将 ${selected.length} 篇文章合并为一个 commit 并推送。`,
-        );
+        setNotice(`已提交 ${selected.length} 篇文章，尚未推送到仓库。`);
         setNoticeUrl(null);
-        await Promise.all([
-          loadArticles(false),
-          loadRepositoryStatus(),
-          loadConflicts(),
-        ]);
       } catch (error) {
         if (!isUnauthorized(error) || !handleUnauthorized()) {
           setWorkspaceError(errorMessage(error));
@@ -861,12 +750,75 @@ export function CmsApp({ apiClient }: CmsAppProps) {
       handleUnauthorized,
       loadArticles,
       loadConflicts,
-      loadRepositoryStatus,
-      localRepository,
       publishing,
       saveState,
     ],
   );
+
+  const pushPending = useCallback(async () => {
+    if (publishing || pendingCommits.length === 0) return;
+    setPublishing(true);
+    setPendingCommitsError(null);
+    try {
+      const result = await client.pushPendingCommits();
+      setPendingCommits([]);
+      setPushConfirmOpen(false);
+      setPendingCommitsOpen(false);
+      await Promise.all([
+        loadArticles(false),
+        loadRepositoryStatus(),
+        loadConflicts(),
+      ]);
+      const currentId = activeIdRef.current;
+      if (currentId) {
+        try {
+          const current = await client.getArticle(currentId);
+          activeArticleRef.current = current;
+          setActiveArticle(current);
+        } catch (error) {
+          if (!(error instanceof CmsApiError) || error.status !== 404) throw error;
+          activeIdRef.current = null;
+          activeArticleRef.current = null;
+          setActiveArticle(null);
+        }
+      }
+      setNotice(localRepository
+        ? `已将 ${result.pushedCommitCount} 个提交写入本地内容目录。`
+        : `已合并推送 ${result.pushedCommitCount} 个提交，预计触发 1 次构建。`);
+    } catch (error) {
+      if (!isUnauthorized(error) || !handleUnauthorized()) {
+        const message = errorMessage(error);
+        setPendingCommitsError(message);
+        setWorkspaceError(message);
+        if (error instanceof CmsApiError && error.status === 409) {
+          await Promise.all([loadConflicts(), loadArticles(false)]);
+        }
+      }
+    } finally {
+      setPublishing(false);
+    }
+  }, [client, handleUnauthorized, loadArticles, loadConflicts, loadRepositoryStatus, localRepository, pendingCommits.length, publishing]);
+
+  const undoLatestPendingCommit = useCallback(async (commitId: string) => {
+    if (publishing) return;
+    setPublishing(true);
+    setPendingCommitsError(null);
+    try {
+      await client.undoPendingCommit(commitId);
+      await Promise.all([loadPendingCommits(), loadArticles(false)]);
+      const currentId = activeIdRef.current;
+      if (currentId) {
+        const current = await client.getArticle(currentId);
+        activeArticleRef.current = current;
+        setActiveArticle(current);
+      }
+      setNotice("已撤销最后一次本地提交，文章仍保留为草稿。");
+    } catch (error) {
+      if (!isUnauthorized(error) || !handleUnauthorized()) setPendingCommitsError(errorMessage(error));
+    } finally {
+      setPublishing(false);
+    }
+  }, [client, handleUnauthorized, loadArticles, loadPendingCommits, publishing]);
 
   const syncRepository = useCallback(async () => {
     if (syncingRepository) return;
@@ -1517,21 +1469,21 @@ export function CmsApp({ apiClient }: CmsAppProps) {
         syncingRepository={syncingRepository}
         pushingRepository={publishing}
         onPullRepository={() => void syncRepository()}
-        onPushCurrent={() => {
+        onCommitCurrent={() => {
           if (!activeArticle) return;
-          if (localRepository) void publish();
-          else {
-            setPublishTargetIds([activeArticle.id]);
-            setPublishDialogOpen(true);
-          }
+          setPublishTargetIds([activeArticle.id]);
+          setPublishDialogOpen(true);
         }}
-        onPushSelected={(articleIds) => {
-          if (localRepository) void publishMany(articleIds);
-          else {
-            setPublishTargetIds(articleIds);
-            setPublishDialogOpen(true);
-          }
+        onCommitSelected={(articleIds) => {
+          setPublishTargetIds(articleIds);
+          setPublishDialogOpen(true);
         }}
+        onOpenPendingCommits={() => {
+          setPendingCommitsError(null);
+          setPendingCommitsOpen(true);
+        }}
+        onPushPendingCommits={() => setPushConfirmOpen(true)}
+        pendingCommitCount={pendingCommits.length}
         onOpenConflicts={() => setConflictCenterOpen(true)}
         conflictCount={conflicts.length}
       />
@@ -1818,6 +1770,15 @@ export function CmsApp({ apiClient }: CmsAppProps) {
                 </span>
               </div>
               <div className="workspace-statusbar__article">
+                <span className={`workspace-sync-state workspace-sync-state--${activeArticle.syncStatus}`}>
+                  {saveState === "dirty" || saveState === "saving"
+                    ? "草稿未保存"
+                    : activeArticle.syncStatus === "committed"
+                      ? "已提交 · 等待推送"
+                      : activeArticle.syncStatus === "synced"
+                        ? "已与仓库同步"
+                        : "草稿已保存 · 尚未提交"}
+                </span>
                 <span title="CMS 草稿的保存修订次数，与 Git commit 不可直接比较">
                   草稿修订 {activeArticle.version}
                 </span>
@@ -1981,7 +1942,6 @@ export function CmsApp({ apiClient }: CmsAppProps) {
                 ? `${activeArticle.syncStatus === "deleting" ? "删除" : activeArticle.baseGitHash ? "更新" : "发布"}：${activeArticle.metadata.title}`
                 : "更新文章"
           }
-          branch={repositoryStatus?.branch || "默认分支"}
           onClose={() => {
             if (!publishing) {
               setPublishDialogOpen(false);
@@ -1992,12 +1952,30 @@ export function CmsApp({ apiClient }: CmsAppProps) {
             setPublishDialogOpen(false);
             const targets = publishTargetIds;
             setPublishTargetIds([]);
-            if (targets.length === 1 && targets[0] === activeArticle?.id)
-              void publish(commitMessage);
-            else void publishMany(targets, commitMessage);
+            void commitMany(targets, commitMessage);
           }}
         />
       ) : null}
+
+      <PendingCommitsDrawer
+        open={pendingCommitsOpen}
+        commits={pendingCommits}
+        busy={publishing}
+        error={pendingCommitsError}
+        onClose={() => setPendingCommitsOpen(false)}
+        onUndoLatest={(commitId) => void undoLatestPendingCommit(commitId)}
+        onPush={() => setPushConfirmOpen(true)}
+      />
+
+      <PushPendingCommitsDialog
+        open={pushConfirmOpen}
+        commits={pendingCommits}
+        branch={repositoryStatus?.branch || "默认分支"}
+        headCommit={repositoryStatus?.headCommit ?? null}
+        busy={publishing}
+        onClose={() => setPushConfirmOpen(false)}
+        onConfirm={() => void pushPending()}
+      />
 
       {activeArticle ? (
         <RenameArticleDialog
