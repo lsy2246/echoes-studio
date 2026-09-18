@@ -4488,6 +4488,8 @@ select:focus-visible {
 
 .cms-cherry__host figure.cms-mermaid-editor {
   position: relative;
+  width: 100% !important;
+  height: auto !important;
   min-height: 188px;
   margin: 18px 0;
   overflow: visible;
@@ -4500,6 +4502,8 @@ select:focus-visible {
   position: relative;
   display: flex;
   width: 100%;
+  height: clamp(260px, 68dvh, 720px);
+  max-height: calc(100dvh - 150px);
   min-height: 188px;
   box-sizing: border-box;
   align-items: center;
@@ -4514,16 +4518,26 @@ select:focus-visible {
   cursor: grabbing;
 }
 
-.cms-cherry__host .cms-mermaid-canvas > svg {
+.cms-cherry__host .cms-mermaid-stage {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  transform: translate(0, 0);
+  transform-origin: center center;
+}
+
+.cms-cherry__host .cms-mermaid-stage > svg {
   flex: 0 0 auto;
   max-width: none !important;
+  max-height: none !important;
   transform-origin: center center;
   transition: transform 120ms ease-out;
   user-select: none;
 }
 
-.cms-cherry__host .cms-mermaid-canvas.is-panning > svg {
-  transition: none;
+.cms-cherry__host .cms-mermaid-canvas.is-panning .cms-mermaid-stage {
+  will-change: transform;
 }
 
 .cms-cherry__host .cms-mermaid-editor:not(.is-read-only) .cms-mermaid-canvas .node,

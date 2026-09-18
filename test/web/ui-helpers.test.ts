@@ -25,6 +25,7 @@ import {
 import {
   findMermaidNodeLabelTarget,
   findMermaidSubgraphLabelTarget,
+  nextMermaidScale,
 } from "../../src/web/editor/mermaid-preview";
 import {
   buildPreviewSearchRegex,
@@ -157,6 +158,13 @@ test("Mermaid subgraph titles expose their visible names", () => {
   const to = target.to - 20;
   const updated = `${source.slice(0, from)}${replacement}${source.slice(to)}`;
   assert.match(updated, /subgraph K8S\["生产集群"\]/);
+});
+
+test("Mermaid zoom supports small diagrams without moving the pan layer", () => {
+  assert.equal(nextMermaidScale(0.5, "out"), 0.4167);
+  assert.equal(nextMermaidScale(0.01, "out"), 0.01);
+  assert.equal(nextMermaidScale(0.004, "out", 0.002), 0.0033);
+  assert.equal(nextMermaidScale(7, "in"), 8);
 });
 
 test("preview search mirrors Cherry search options", () => {

@@ -15,15 +15,21 @@ export interface LabelTarget {
 interface MermaidFigureState {
   figure: HTMLElement;
   canvas: HTMLElement;
+  stage: HTMLElement;
   svg: SVGSVGElement;
   scale: number;
+  minScale: number;
   panX: number;
   panY: number;
+  fitted: boolean;
   cleanup: () => void;
 }
 
 const MERMAID_LANGUAGES = new Set(["mermaid"]);
 const NODE_ID_PATTERN = /-(?:flowchart|graph)-(.+)-\d+$/;
+const MIN_MANUAL_SCALE = 0.01;
+const MAX_SCALE = 8;
+const ZOOM_FACTOR = 1.2;
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -245,7 +251,27 @@ function subgraphId(element: Element, body: string): string | null {
 }
 
 function updateTransform(state: MermaidFigureState): void {
-  state.svg.style.transform = `translate(${state.panX}px, ${state.panY}px) scale(${state.scale})`;
+  state.stage.style.transform = `translate(${state.panX}px, ${state.panY}px)`;
+  state.svg.style.transform = `scale(${state.scale})`;
+}
+
+export function nextMermaidScale(
+  current: number,
+  direction: "in" | "out",
+  minimum = MIN_MANUAL_SCALE,
+): number {
+  const next =
+    direction === "in" ? current * ZOOM_FACTOR : current / ZOOM_FACTOR;
+  return Math.min(MAX_SCALE, Math.max(minimum, +next.toFixed(4)));
+}
+
+function zoomFigure(
+  state: MermaidFigureState,
+  direction: "in" | "out",
+): void {
+  state.scale = nextMermaidScale(state.scale, direction, state.minScale);
+  state.fitted = false;
+  updateTransform(state);
 }
 
 function fitFigure(state: MermaidFigureState): void {
@@ -265,8 +291,10 @@ function fitFigure(state: MermaidFigureState): void {
     availableWidth / naturalWidth,
     availableHeight / naturalHeight,
   );
+  state.minScale = Math.min(MIN_MANUAL_SCALE, state.scale);
   state.panX = 0;
   state.panY = 0;
+  state.fitted = true;
   updateTransform(state);
 }
 
@@ -300,6 +328,8 @@ function installFigure(
   figure.dataset.cmsMermaidReady = "true";
   figure.classList.add("cms-mermaid-editor");
   figure.classList.toggle("is-read-only", readOnly);
+  figure.style.removeProperty("width");
+  figure.style.removeProperty("height");
   figure
     .closest(".cherry")
     ?.querySelector<HTMLElement>(".cherry-previewer-img-handler")
@@ -307,16 +337,27 @@ function installFigure(
 
   const canvas = document.createElement("div");
   canvas.className = "cms-mermaid-canvas";
+  const stage = document.createElement("div");
+  stage.className = "cms-mermaid-stage";
+  const viewBox = svg.viewBox.baseVal;
+  if (viewBox.width > 0 && viewBox.height > 0) {
+    svg.style.width = `${viewBox.width}px`;
+    svg.style.height = `${viewBox.height}px`;
+  }
   svg.parentElement?.insertBefore(canvas, svg);
-  canvas.appendChild(svg);
+  stage.appendChild(svg);
+  canvas.appendChild(stage);
 
   const state: MermaidFigureState = {
     figure,
     canvas,
+    stage,
     svg,
     scale: 1,
+    minScale: MIN_MANUAL_SCALE,
     panX: 0,
     panY: 0,
+    fitted: true,
     cleanup: () => {},
   };
 
@@ -325,12 +366,10 @@ function installFigure(
   toolbar.setAttribute("aria-label", "Mermaid 图表视图控制");
   toolbar.append(
     createButton("−", "缩小图表", () => {
-      state.scale = Math.max(0.5, +(state.scale - 0.1).toFixed(2));
-      updateTransform(state);
+      zoomFigure(state, "out");
     }),
     createButton("＋", "放大图表", () => {
-      state.scale = Math.min(4, +(state.scale + 0.1).toFixed(2));
-      updateTransform(state);
+      zoomFigure(state, "in");
     }),
     createButton("适应", "适应图表到窗口", () => fitFigure(state)),
   );
@@ -362,6 +401,7 @@ function installFigure(
     pointer.y = event.clientY;
     state.panX += dx;
     state.panY += dy;
+    state.fitted = false;
     updateTransform(state);
   };
   const stopPan = () => {
@@ -370,14 +410,7 @@ function installFigure(
   };
   const onWheel = (event: WheelEvent) => {
     event.preventDefault();
-    state.scale = Math.min(
-      4,
-      Math.max(
-        0.5,
-        +(state.scale + (event.deltaY < 0 ? 0.1 : -0.1)).toFixed(2),
-      ),
-    );
-    updateTransform(state);
+    zoomFigure(state, event.deltaY < 0 ? "in" : "out");
   };
 
   const closeEditor = () => {
@@ -551,8 +584,13 @@ function installFigure(
   figure.addEventListener("click", onClick);
   canvas.addEventListener("keydown", onKeyDown);
   requestAnimationFrame(() => fitFigure(state));
+  const resizeObserver = new ResizeObserver(() => {
+    if (state.fitted) fitFigure(state);
+  });
+  resizeObserver.observe(canvas);
   state.cleanup = () => {
     closeEditor();
+    resizeObserver.disconnect();
     toolbar.remove();
     canvas.removeEventListener("pointerdown", onPointerDown);
     canvas.removeEventListener("pointermove", onPointerMove);
@@ -562,7 +600,7 @@ function installFigure(
     figure.removeEventListener("click", onClick);
     canvas.removeEventListener("keydown", onKeyDown);
     if (canvas.parentElement === figure) {
-      if (svg.parentElement === canvas) figure.insertBefore(svg, canvas);
+      if (svg.parentElement === stage) figure.insertBefore(svg, canvas);
       canvas.remove();
     }
     delete figure.dataset.cmsMermaidReady;
