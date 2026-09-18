@@ -262,7 +262,7 @@ function articleDocument(
   return {
     ...articleSummary(article, draft, hasConflict),
     source: draft?.source ?? article.source,
-    baseGitHash: article.contentHash,
+    baseGitHash: article.gitCommitSha ? article.contentHash : null,
   };
 }
 
@@ -527,17 +527,21 @@ export function createApp(
           title: titleFromFrontmatter(parsed.frontmatter, pathValue),
         });
       }
-      const databasePaths = new Set<string>();
+      const repositoryBackedPaths = new Set<string>();
+      const cmsOnlyArticleIds = new Set<string>();
       let cursor: string | undefined;
       do {
         const page = await options.database.listArticles({
           cursor,
           limit: 100,
         });
-        for (const article of page.items) databasePaths.add(article.path);
+        for (const article of page.items) {
+          if (article.gitCommitSha) repositoryBackedPaths.add(article.path);
+          else cmsOnlyArticleIds.add(article.id);
+        }
         cursor = page.nextCursor ?? undefined;
       } while (cursor);
-      const deletedPaths = [...databasePaths].filter(
+      const deletedPaths = [...repositoryBackedPaths].filter(
         (pathValue) => !seenPaths.has(pathValue),
       );
       const result = await options.database.importBatch({
@@ -547,6 +551,27 @@ export function createApp(
         deletedPaths,
         now: now(),
       });
+      // Before CMS-only paths were excluded above, a repository snapshot could
+      // misclassify a never-published article as remotely deleted. Resolve only
+      // that exact legacy shape; genuine Git deletion conflicts have a baseline.
+      for (const conflict of await options.database.listContentConflicts()) {
+        if (
+          cmsOnlyArticleIds.has(conflict.articleId) &&
+          conflict.issues.length === 1 &&
+          conflict.issues[0] === "delete_edit" &&
+          conflict.basePath === null &&
+          conflict.remotePath === null &&
+          conflict.remoteHash === null &&
+          conflict.occupiedPath === null &&
+          !seenPaths.has(conflict.draftPath)
+        ) {
+          await options.database.resolveContentConflict(
+            conflict.id,
+            "converged",
+            now(),
+          );
+        }
+      }
       return {
         repositoryId: snapshot.repositoryId,
         branch: snapshot.branch,
@@ -1708,9 +1733,11 @@ export function createApp(
             conflictId: recorded.id,
           });
         }
-        const draftBasePath =
-          existingDraft?.basePath ??
-          (article.gitCommitSha ? article.path : null);
+        const draftBasePath = existingDraft
+          ? existingDraft.basePath
+          : article.gitCommitSha
+            ? article.path
+            : null;
         let currentArticle = article;
         if (body.path !== undefined) {
           const nextPath = articlePath(body.path);
@@ -1770,13 +1797,21 @@ export function createApp(
           contentHash: sourceHash,
           baseContentHash:
             body.baseContentHash === undefined
-              ? currentArticle.contentHash
+              ? existingDraft
+                ? existingDraft.baseContentHash
+                : currentArticle.gitCommitSha
+                  ? currentArticle.contentHash
+                  : null
               : body.baseContentHash === null
                 ? null
                 : requiredString(body.baseContentHash, "baseContentHash", {
                     max: 64,
                   }),
-          baseSource: existingDraft?.baseSource ?? currentArticle.source,
+          baseSource: existingDraft
+            ? existingDraft.baseSource
+            : currentArticle.gitCommitSha
+              ? currentArticle.source
+              : null,
           now: now(),
         });
         if (!draft)

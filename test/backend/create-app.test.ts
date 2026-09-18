@@ -680,6 +680,74 @@ describe("createApp repository orchestration", () => {
     assert.equal(await database.getArticle(local.id), null);
   });
 
+  it("keeps never-published CMS articles out of repository deletion conflicts", async () => {
+    const database = new MemoryDatabase();
+    const repository = new FakeRepository();
+    const app = createApp(appOptions(database, repository));
+    const client = new FetchCmsApiClient({
+      baseUrl: "https://studio.example/api",
+      token: "admin-secret",
+      fetch: ((input: URL | RequestInfo, init?: RequestInit) =>
+        app(new Request(input, init))) as typeof globalThis.fetch,
+    });
+    const initialSource = "---\ntitle: CMS only\n---\n\nNot published yet\n";
+    const created = await client.createArticle({
+      path: "content/cms-only.md",
+      format: "md",
+      source: initialSource,
+    });
+    const saved = await client.saveDraft({
+      id: created.id,
+      path: created.path,
+      source: `${initialSource}\nStill only in CMS.\n`,
+      version: created.version,
+    });
+    const source = saved.article.source;
+    const cmsOnlyDraft = (await database.getDraft(created.id))!;
+    assert.equal(cmsOnlyDraft.basePath, null);
+    assert.equal(cmsOnlyDraft.baseContentHash, null);
+    assert.equal(cmsOnlyDraft.baseSource, null);
+    assert.equal(saved.article.baseGitHash, null);
+
+    const result = await client.syncRepository();
+
+    assert.equal(result.conflicts.length, 0);
+    assert.equal((await client.getArticle(created.id)).source, source);
+    assert.equal((await client.getArticle(created.id)).syncStatus, "unpublished");
+    assert.equal(await database.getOpenContentConflictByArticle(created.id), null);
+
+    const draft = (await database.getDraft(created.id))!;
+    await database.recordContentConflict({
+      id: "legacy-false-positive",
+      articleId: created.id,
+      issues: ["delete_edit"],
+      basePath: null,
+      baseSource: source,
+      // Older autosaves could retain an initial CMS hash even though the
+      // article had never acquired a Git baseline.
+      baseHash: "legacy-cms-only-base-hash",
+      remotePath: null,
+      remoteSource: null,
+      remoteHash: null,
+      occupiedPath: null,
+      occupiedSource: null,
+      occupiedHash: null,
+      remoteCommitSha: repository.snapshotValue.headCommit,
+      draftPath: created.path,
+      draftSource: draft.source,
+      draftHash: draft.contentHash,
+      draftVersion: draft.version,
+      now: "2026-08-13T12:00:00.000Z",
+    });
+    repository.snapshotValue.headCommit = "2".repeat(40);
+
+    const recovered = await client.syncRepository();
+
+    assert.equal(recovered.conflicts.length, 0);
+    assert.equal(await database.getOpenContentConflictByArticle(created.id), null);
+    assert.equal((await client.getArticle(created.id)).syncStatus, "unpublished");
+  });
+
   it("completes a direct publish synchronously", async () => {
     const database = new MemoryDatabase();
     const repository = new FakeRepository();

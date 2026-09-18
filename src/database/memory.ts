@@ -480,7 +480,7 @@ export class MemoryDatabase implements DatabasePort {
         imported += 1;
       } else {
         const draft = this.drafts.get(existing.id);
-        const baseHash = draft?.baseContentHash ?? existing.contentHash;
+        const baseHash = draft ? draft.baseContentHash : existing.contentHash;
         if (
           draft &&
           draft.contentHash !== baseHash &&

@@ -1818,7 +1818,9 @@ export function CmsApp({ apiClient }: CmsAppProps) {
                 </span>
               </div>
               <div className="workspace-statusbar__article">
-                <span>v{activeArticle.version}</span>
+                <span title="CMS 草稿的保存修订次数，与 Git commit 不可直接比较">
+                  草稿修订 {activeArticle.version}
+                </span>
                 <span>
                   {source.trim() ? source.trim().split(/\s+/).length : 0} 词
                 </span>

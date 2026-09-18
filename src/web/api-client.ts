@@ -567,8 +567,11 @@ export class FetchCmsApiClient implements CmsApiClient {
     return {
       ...this.#toSummary(article),
       source: article.draft?.source ?? article.source,
-      baseGitHash:
-        article.draft?.baseContentHash ?? article.contentHash ?? null,
+      baseGitHash: article.draft
+        ? (article.draft.baseContentHash ?? null)
+        : article.gitCommitSha
+          ? (article.contentHash ?? null)
+          : null,
     };
   }
 

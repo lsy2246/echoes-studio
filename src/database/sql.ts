@@ -770,7 +770,7 @@ export class SqlDatabase implements DatabasePort {
             imported += 1;
           } else {
             const draft = await scoped.getDraft(existing.id);
-            const baseHash = draft?.baseContentHash ?? existing.contentHash;
+            const baseHash = draft ? draft.baseContentHash : existing.contentHash;
             if (
               draft &&
               draft.contentHash !== baseHash &&
